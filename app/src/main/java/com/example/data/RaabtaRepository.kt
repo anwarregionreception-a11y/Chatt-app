@@ -29,7 +29,6 @@ class RaabtaRepository(private val dao: AppDao) {
     )
     dao.upsertUser(owner)
 }
-    }
 
     fun observeAllUsers(): Flow<List<UserEntity>> = dao.observeAllUsers()
     fun observeUser(userId: String): Flow<UserEntity?> = dao.observeUser(userId)
