@@ -26,7 +26,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import com.aistudio.rabbta.ky9n2p.R
+import com.example.R
 import com.example.ui.AuthUiState
 
 @Composable
