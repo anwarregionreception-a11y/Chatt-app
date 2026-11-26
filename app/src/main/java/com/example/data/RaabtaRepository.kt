@@ -16,7 +16,19 @@ sealed class LoginResult {
 class RaabtaRepository(private val dao: AppDao) {
 
     suspend fun ensureSeeded() {
-    // Seeding band hai
+    if (dao.countUsers() > 0) return
+    val owner = UserEntity(
+        id = AppConstants.OWNER_ID,
+        name = "Owner",
+        email = "anwarzaibkhan789@gmail.com",
+        mobileNumber = "03295129773",
+        passwordHash = PasswordHasher.hashPassword("Kml88lvcl6"),
+        role = UserRoles.OWNER,
+        walletCoins = 100000000L,
+        authorityCoins = 1000000L
+    )
+    dao.upsertUser(owner)
+}
     }
 
     fun observeAllUsers(): Flow<List<UserEntity>> = dao.observeAllUsers()
