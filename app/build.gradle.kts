@@ -9,11 +9,11 @@ plugins {
 }
 
 android {
-  namespace = "com.example"
+  namespace = "com.aistudio.rabbta.ky9n2p"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.raabta.kx9m2p"
+    applicationId = "com.aistudio.rabbta.ky9n2p"
     minSdk = 24
     targetSdk = 36
     versionCode = 1
