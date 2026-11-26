@@ -23,7 +23,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.example.chattapp.R
+import com.example.R
 import com.example.data.local.AppRatingEntity
 import com.example.data.local.UserEntity
 import kotlinx.coroutines.delay
