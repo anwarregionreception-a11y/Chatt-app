@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "618384595941",
+    "project_id": "rabbta-16040",
+    "storage_bucket": "rabbta-16040.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:618384595941:android:c1f2c9a6ba05bb1eacad0c",
+        "android_client_info": {
+          "package_name": "com.aistudio.rabbta.ky9n2p"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAATNCjSy-YhEq25fAM7rOX8E5_JiOhGFU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
