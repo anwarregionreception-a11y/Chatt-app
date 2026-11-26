@@ -6,7 +6,7 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
-import com.aistudio.rabbta.ky9n2p.R
+import com.rabbta.chatapp.v1.R
 
 val SpaceGroteskFamily = FontFamily(
     Font(R.font.space_grotesk, FontWeight.Normal),
