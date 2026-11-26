@@ -15,7 +15,9 @@ sealed class LoginResult {
 
 class RaabtaRepository(private val dao: AppDao) {
 
-    suspend fun ensureSeeded() = dao.seedIfEmptyWrapper()
+    suspend fun ensureSeeded() {
+    // Seeding band hai
+    }
 
     fun observeAllUsers(): Flow<List<UserEntity>> = dao.observeAllUsers()
     fun observeUser(userId: String): Flow<UserEntity?> = dao.observeUser(userId)
