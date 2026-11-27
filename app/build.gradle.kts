@@ -9,11 +9,11 @@ plugins {
 }
 
 android {
-  namespace = "com.rabbta.chatapp.v2"
+  namespace = "com.rabbta.chatapp.v1"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.rabbta.chatapp.v2"
+    applicationId = "com.rabbta.chatapp.v1"
     minSdk = 24
     targetSdk = 33
     versionCode = 1
