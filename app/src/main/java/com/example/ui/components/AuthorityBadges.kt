@@ -28,7 +28,7 @@ import com.example.domain.BadgeType
 
 fun badgeColor(type: BadgeType): Color = when (type) {
     BadgeType.WHITE_DIAMOND -> Color(0xFFF8FAFC)
-    BadgeType.BLACK_GEM -> Color(0xFF1E293B)
+    BadgeType.BLACK_GEM -> Color(0xFF9CA3AF)
     BadgeType.YELLOW_GEM -> Color(0xFFEAB308)
     BadgeType.PURPLE_GEM -> Color(0xFF9333EA)
     BadgeType.CYAN_GEM -> Color(0xFF06B6D4)
@@ -39,7 +39,7 @@ fun badgeColor(type: BadgeType): Color = when (type) {
     BadgeType.SILVER_STAR -> Color(0xFF94A3B8)
     BadgeType.LIGHT_GOLD_STAR -> Color(0xFFFBBF24)
     BadgeType.ORANGE_STAR -> Color(0xFFF97316)
-    BadgeType.OUTLINE_STAR -> Color(0xFF0B6E5B)
+    BadgeType.OUTLINE_STAR -> Color(0xFFD4AF37)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -167,8 +167,8 @@ fun UserAvatar(
     val initials = name.trim().split(" ").filter { it.isNotBlank() }.take(2)
         .joinToString("") { it.first().uppercaseChar().toString() }.ifBlank { "R" }
     val palette = listOf(
-        Color(0xFF0B6E5B), Color(0xFF2563EB), Color(0xFF9333EA),
-        Color(0xFFD97706), Color(0xFFDC2626), Color(0xFF0D9488)
+        Color(0xFF8A6D1D), Color(0xFF6E5716), Color(0xFF9C7A22),
+        Color(0xFF7A5C12), Color(0xFF5C4A14), Color(0xFF8C7430)
     )
     val bgColor = palette[kotlin.math.abs(name.hashCode()) % palette.size]
 

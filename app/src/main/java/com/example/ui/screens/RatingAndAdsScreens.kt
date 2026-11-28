@@ -162,7 +162,7 @@ fun AdsTab(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC062E28))))
+                        .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC080808))))
                 )
                 Column(modifier = Modifier.align(Alignment.BottomStart).padding(16.dp)) {
                     Text("1 Ad = 1 Coin", style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold)

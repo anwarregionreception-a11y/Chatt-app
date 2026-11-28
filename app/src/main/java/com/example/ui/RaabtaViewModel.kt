@@ -8,6 +8,7 @@ import com.example.data.local.*
 import com.example.data.remote.CloudAuthService
 import com.example.data.remote.CloudChatService
 import com.example.data.remote.CloudUser
+import com.example.data.remote.PublicProfile
 import com.example.data.remote.readableCloudError
 import com.example.security.PasswordHasher
 import kotlinx.coroutines.Job
@@ -32,6 +33,7 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
     private val cloud = CloudAuthService()
     private val chat = CloudChatService()
     private var syncJob: Job? = null
+    private val refreshedPeers = mutableSetOf<String>()
 
     private val _friendSearch = MutableStateFlow(FriendSearchState())
     val friendSearch: StateFlow<FriendSearchState> = _friendSearch.asStateFlow()
@@ -109,25 +111,29 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun openSession(user: CloudUser) {
-        repository.saveSignedInUser(user.uid, user.name, user.email)
+        val isNewOnThisPhone = repository.saveSignedInUser(user.uid, user.name, user.email)
         _currentUserId.value = user.uid
         _authState.value = AuthUiState()
-        startSync(user.uid)
-        viewModelScope.launch {
-            cloud.ensureProfile(user).onFailure { e ->
-                _toastMessage.value = "Profile online save nahi hua: ${e.message}"
-            }
-        }
+        startSync(user, isNewOnThisPhone)
     }
 
-    /** Listens for friend requests and new messages while the app is running. */
-    private fun startSync(uid: String) {
+    /** Keeps the profile, friend list and messages in step while the app is running. */
+    private fun startSync(user: CloudUser, isNewOnThisPhone: Boolean) {
+        val uid = user.uid
         syncJob?.cancel()
+        refreshedPeers.clear()
         syncJob = viewModelScope.launch {
+            launch { syncOwnProfile(user, isNewOnThisPhone) }
             launch {
                 chat.observeFriendships(uid)
                     .catch { _toastMessage.value = readableCloudError(it) }
-                    .collect { repository.syncFriendships(uid, it) }
+                    .collect { online ->
+                        repository.syncFriendships(uid, online)
+                        // One profile read per friend each time the app starts
+                        online.items.flatMap { it.members }
+                            .filter { it != uid && refreshedPeers.add(it) }
+                            .forEach { peerId -> launch { loadProfile(peerId) } }
+                    }
             }
             launch {
                 chat.observeInbox(uid)
@@ -140,6 +146,38 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
                     }
             }
         }
+    }
+
+    private suspend fun syncOwnProfile(user: CloudUser, isNewOnThisPhone: Boolean) {
+        if (isNewOnThisPhone) {
+            // Restore the online values first so new defaults do not overwrite them.
+            val saved = cloud.fetchProfile(user.uid).getOrElse {
+                _toastMessage.value = "Profile load nahi hua: ${it.message}"
+                return
+            }
+            if (saved != null) repository.applyProfile(user.uid, saved, isOwnAccount = true)
+        }
+        repository.observeUser(user.uid)
+            .filterNotNull()
+            .map { PublicProfile(it.name, it.showCoinsOnProfile, it.walletCoins, it.authorityCoins) }
+            .distinctUntilChanged()
+            .collect { profile ->
+                cloud.publishProfile(user.uid, user.email, profile).onFailure {
+                    _toastMessage.value = "Profile online save nahi hua: ${it.message}"
+                }
+            }
+    }
+
+    private suspend fun loadProfile(peerId: String) {
+        cloud.fetchProfile(peerId).getOrNull()?.let {
+            repository.applyProfile(peerId, it, isOwnAccount = false)
+        }
+    }
+
+    /** Fetches the latest public details of another user. */
+    fun refreshProfile(peerId: String) {
+        if (peerId == _currentUserId.value) return
+        viewModelScope.launch { loadProfile(peerId) }
     }
 
     suspend fun sendFriendRequest(fromUserId: String, toUserId: String): Result<Unit> {
@@ -252,7 +290,13 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
             cloud.searchUsers(query)
                 .onSuccess { found ->
                     val people = found.filter { it.uid != uid }
-                        .map { repository.savePeer(it.uid, it.name, it.email) }
+                        .map { person ->
+                            val saved = repository.savePeer(person.uid, person.name, person.email)
+                            person.profile?.let {
+                                repository.applyProfile(person.uid, it, isOwnAccount = false)
+                            }
+                            repository.getUserById(person.uid) ?: saved
+                        }
                     _friendSearch.value = FriendSearchState(
                         results = people,
                         message = if (people.isEmpty()) "Koi user nahi mila" else null

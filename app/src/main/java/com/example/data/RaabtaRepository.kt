@@ -3,6 +3,7 @@ package com.example.data
 import com.example.data.local.*
 import com.example.data.remote.CloudFriendshipList
 import com.example.data.remote.CloudMessage
+import com.example.data.remote.PublicProfile
 import com.example.domain.AuthorityEngine
 import com.example.security.PasswordHasher
 import kotlinx.coroutines.flow.Flow
@@ -19,7 +20,8 @@ class RaabtaRepository(private val dao: AppDao) {
 
     // --- ONLINE ACCOUNTS (local copy) ---
 
-    suspend fun saveSignedInUser(userId: String, name: String, email: String) {
+    /** Returns true when this account is new on this phone. */
+    suspend fun saveSignedInUser(userId: String, name: String, email: String): Boolean {
         val existing = dao.getUserById(userId)
         dao.upsertUser(
             existing?.copy(name = name, email = email) ?: UserEntity(
@@ -30,6 +32,26 @@ class RaabtaRepository(private val dao: AppDao) {
                 passwordHash = "", // Firebase Authentication keeps the password
                 walletCoins = 50L,
                 authorityCoins = 1L
+            )
+        )
+        return existing == null
+    }
+
+    /** Copies an online public profile onto the local record. */
+    suspend fun applyProfile(userId: String, profile: PublicProfile, isOwnAccount: Boolean) {
+        val user = dao.getUserById(userId) ?: return
+        // Hidden coins are not shared, so keep the local balance for the signed-in account.
+        val coins = when {
+            profile.showCoins -> profile.coins
+            isOwnAccount -> user.walletCoins
+            else -> 0L
+        }
+        dao.upsertUser(
+            user.copy(
+                name = profile.name,
+                showCoinsOnProfile = profile.showCoins,
+                walletCoins = coins,
+                authorityCoins = profile.authorityCoins
             )
         )
     }

@@ -2,16 +2,15 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val EmeraldPrimary = Color(0xFF0B6E5B)
-val EmeraldDark = Color(0xFF074D40)
-val EmeraldLight = Color(0xFF14B88A)
-val MintSurface = Color(0xFFE6F6F1)
-val GoldAmber = Color(0xFFF59E0B)
-val GoldLight = Color(0xFFFEF3C7)
-val DeepSlate = Color(0xFF111B19)
-val SoftGrayBg = Color(0xFFF5F7F6)
-val CardWhite = Color(0xFFFFFFFF)
-val ChatSentBubble = Color(0xFFD8F5EC)
-val ChatSentBubbleDark = Color(0xFF0E4B3E)
-val ChatReceivedDark = Color(0xFF1C2725)
-val ErrorCrimson = Color(0xFFDC2626)
+val MatteBlack = Color(0xFF080808)
+val RoyalGold = Color(0xFFD4AF37)
+val ChampagneGold = Color(0xFFFFD76A)
+val PureWhite = Color(0xFFFFFFFF)
+
+// Darker shades of the same palette, for cards, bubbles and borders
+val BlackSurface = Color(0xFF121212)
+val BlackRaised = Color(0xFF1C1C1C)
+val DeepGold = Color(0xFF3A2F0E)
+val BorderGold = Color(0xFF7A6522)
+val SoftWhite = Color(0xFFCFC8B4)
+val ChatSentBubble = Color(0xFF46390F)

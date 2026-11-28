@@ -8,12 +8,16 @@ service cloud.firestore {
       allow list: if request.auth != null && request.query.limit <= 20;
       allow create, update: if request.auth != null
         && request.auth.uid == userId
-        && request.resource.data.keys().hasOnly(['name', 'nameLower'])
+        && request.resource.data.keys().hasOnly(
+             ['name', 'keywords', 'showCoins', 'coins', 'authorityCoins'])
         && request.resource.data.name is string
         && request.resource.data.name.size() >= 1
         && request.resource.data.name.size() <= 50
-        && request.resource.data.nameLower is string
-        && request.resource.data.nameLower.size() <= 100;
+        && request.resource.data.keywords is list
+        && request.resource.data.keywords.size() <= 100
+        && request.resource.data.showCoins is bool
+        && request.resource.data.get('coins', 0) is int
+        && request.resource.data.authorityCoins is int;
     }
 
     // Email lookup: exact address only, no listing.

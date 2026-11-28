@@ -42,6 +42,7 @@ fun ChatsTab(
     friendSearch: FriendSearchState,
     onSearchUsers: (String) -> Unit,
     onClearSearch: () -> Unit,
+    onViewProfile: (String) -> Unit,
     onOpenDirectChat: (String) -> Unit,
     onOpenSystemInbox: () -> Unit,
     onAcceptFriend: (String) -> Unit,
@@ -372,7 +373,10 @@ fun ChatsTab(
         )
     }
 
-    selectedProfileUser?.let { profile ->
+    selectedProfileUser?.let { selected ->
+        LaunchedEffect(selected.id) { onViewProfile(selected.id) }
+        // Show the stored record so freshly loaded details appear in the open dialog
+        val profile = allUsers.firstOrNull { it.id == selected.id } ?: selected
         UserProfileModal(
             user = profile,
             isFriend = profile.id in acceptedFriendIds,

@@ -72,7 +72,7 @@ fun LoginScreen(
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            listOf(Color.Transparent, Color(0xCC062E28))
+                            listOf(Color.Transparent, Color(0xCC080808))
                         )
                     )
             )
@@ -88,7 +88,7 @@ fun LoginScreen(
                     Icon(
                         imageVector = Icons.Filled.Forum,
                         contentDescription = null,
-                        tint = Color(0xFF4ADE80),
+                        tint = Color(0xFFFFD76A),
                         modifier = Modifier.size(26.dp)
                     )
                     Text(

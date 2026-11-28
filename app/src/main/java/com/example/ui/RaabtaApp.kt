@@ -186,6 +186,7 @@ private fun AuthenticatedNavHost(
                             friendSearch = friendSearch,
                             onSearchUsers = viewModel::searchUsers,
                             onClearSearch = viewModel::clearFriendSearch,
+                            onViewProfile = viewModel::refreshProfile,
                             onOpenDirectChat = { peerId -> navController.navigate(Routes.directChat(peerId)) },
                             onOpenSystemInbox = { navController.navigate(Routes.SYSTEM_INBOX) },
                             onAcceptFriend = { relId ->
@@ -268,6 +269,7 @@ private fun AuthenticatedNavHost(
             val isFriend = friendRelations.any {
                 it.status == "ACCEPTED" && (it.userA == peerId || it.userB == peerId)
             }
+            LaunchedEffect(peerId) { viewModel.refreshProfile(peerId) }
             DirectChatScreen(
                 currentUser = user,
                 peer = peer,

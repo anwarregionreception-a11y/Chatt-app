@@ -35,6 +35,12 @@ Last updated: 28 November 2026.
   delivery and kept in Room on the phone). Needs the new `firestore.rules` published and a two-phone test.
 - Search tested successfully on the owner's setup.
 
+- Phase 2 tested on two phones: search by email, friend request and messages arrive.
+- Black and gold theme (#080808, #D4AF37, #FFD76A, #FFFFFF), always dark. Sent bubble text fixed.
+- Public profile (name, coins if allowed, authority) synced; name search uses keywords.
+  These values come from the user's phone and are NOT trusted until phases 4 and 5.
+  Profile pictures and mobile numbers are not synced.
+
 ## Pending
 - Test phase 2 on two phones, then merge into `main` (ask first).
 - No push notifications yet: messages arrive while the app is running or when it is next opened.
