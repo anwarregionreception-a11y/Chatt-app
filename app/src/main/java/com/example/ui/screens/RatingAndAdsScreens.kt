@@ -68,7 +68,7 @@ fun RatingTab(
         item {
             Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Rate Raabta", style = MaterialTheme.typography.titleMedium)
+                    Text("Rate Millionaire", style = MaterialTheme.typography.titleMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         for (star in 1..5) {
                             IconButton(

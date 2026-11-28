@@ -534,7 +534,7 @@ class RaabtaRepository(private val dao: AppDao) {
         val group = GroupEntity(
             id = "grp_${UUID.randomUUID().toString().take(8)}",
             name = cleanName,
-            description = description.trim().ifBlank { "Community group on Raabta" },
+            description = description.trim().ifBlank { "Community group on Millionaire" },
             ownerId = owner.id,
             isPublic = isPublic,
             memberLimit = AppConstants.GROUP_INITIAL_MEMBER_LIMIT,

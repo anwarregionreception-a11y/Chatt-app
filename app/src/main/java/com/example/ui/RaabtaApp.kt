@@ -112,7 +112,7 @@ private fun AuthenticatedNavHost(
                     TopAppBar(
                         title = {
                             Column {
-                                Text("Raabta", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                Text("Millionaire", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                                 Text(
                                     text = "${user.name} • ${selectedTab.label}",
                                     style = MaterialTheme.typography.labelSmall,
@@ -240,7 +240,7 @@ private fun AuthenticatedNavHost(
                         HomeTab.RATING -> RatingTab(
                             ratings = allRatings,
                             onSubmitRating = { stars, comment ->
-                                viewModel.runAction("Thanks for rating Raabta!") { uid ->
+                                viewModel.runAction("Thanks for rating Millionaire!") { uid ->
                                     viewModel.repository.submitAppRating(uid, stars, comment)
                                 }
                             }

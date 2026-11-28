@@ -63,7 +63,7 @@ fun LoginScreen(
         ) {
             Image(
                 painter = painterResource(id = R.drawable.img_login_hero),
-                contentDescription = "Raabta Community Hero",
+                contentDescription = "Millionaire Community Hero",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
@@ -92,7 +92,7 @@ fun LoginScreen(
                         modifier = Modifier.size(26.dp)
                     )
                     Text(
-                        text = "Raabta",
+                        text = "Millionaire",
                         style = MaterialTheme.typography.displaySmall,
                         color = Color.White
                     )
