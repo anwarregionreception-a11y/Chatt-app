@@ -1,6 +1,8 @@
 package com.example.data
 
 import com.example.data.local.*
+import com.example.data.remote.CloudFriendshipList
+import com.example.data.remote.CloudMessage
 import com.example.domain.AuthorityEngine
 import com.example.security.PasswordHasher
 import kotlinx.coroutines.flow.Flow
@@ -482,35 +484,44 @@ class RaabtaRepository(private val dao: AppDao) {
 
     // --- FRIENDS & DIRECT CHATS ---
 
-    suspend fun sendFriendRequest(fromUserId: String, toUserId: String): Result<Unit> {
-        // A request saved only on this phone would never reach the other person.
-        return Result.failure(IllegalStateException("Online friend request agle update mein aayegi"))
-    }
+    suspend fun findFriendRelation(userId: String, peerId: String): FriendRelationEntity? =
+        dao.findFriendRelation(userId, peerId)
 
-    suspend fun respondFriendRequest(relationId: String, accept: Boolean, allRelations: List<FriendRelationEntity>): Result<Unit> {
-        val rel = allRelations.firstOrNull { it.id == relationId }
-            ?: return Result.failure(IllegalStateException("Request not found"))
-        if (accept) {
-            dao.upsertFriendRelation(rel.copy(status = "ACCEPTED"))
-        } else {
-            dao.deleteFriendRelation(rel.id)
+    /** Copies the online friend list to this phone. */
+    suspend fun syncFriendships(userId: String, online: CloudFriendshipList) {
+        // An offline (cached) list may be incomplete, so only a server list removes entries.
+        if (online.fromServer) {
+            val onlineIds = online.items.map { it.id }.toSet()
+            dao.getFriendRelations(userId)
+                .filter { it.id !in onlineIds }
+                .forEach { dao.deleteFriendRelation(it.id) }
         }
-        return Result.success(Unit)
+        online.items.forEach { friendship ->
+            val peerId = friendship.members.firstOrNull { it != userId } ?: return@forEach
+            savePeer(peerId, friendship.names[peerId] ?: "User", "")
+            dao.upsertFriendRelation(
+                FriendRelationEntity(
+                    id = friendship.id,
+                    userA = userId,
+                    userB = peerId,
+                    status = friendship.status,
+                    requestedBy = friendship.requestedBy,
+                    createdAt = friendship.createdAt
+                )
+            )
+        }
     }
 
-    suspend fun sendDirectMessage(senderId: String, receiverId: String, text: String): Result<Unit> {
-        val clean = text.trim()
-        if (clean.isBlank()) return Result.failure(IllegalArgumentException("Empty message"))
+    suspend fun saveMessage(receiverId: String, message: CloudMessage) {
         dao.insertDirectMessage(
             DirectMessageEntity(
-                id = "dm_${UUID.randomUUID().toString().take(8)}",
-                senderId = senderId,
+                id = message.id,
+                senderId = message.senderId,
                 receiverId = receiverId,
-                text = clean,
-                timestamp = System.currentTimeMillis()
+                text = message.text,
+                timestamp = message.sentAt
             )
         )
-        return Result.success(Unit)
     }
 
     // --- GROUPS, FUNDS, SUPERVISORS & AUTHORITY MODERATION ---

@@ -6,7 +6,9 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.RaabtaRepository
 import com.example.data.local.*
 import com.example.data.remote.CloudAuthService
+import com.example.data.remote.CloudChatService
 import com.example.data.remote.CloudUser
+import com.example.data.remote.readableCloudError
 import com.example.security.PasswordHasher
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
@@ -28,6 +30,8 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
     private val dao = AppDatabase.getInstance(application).appDao()
     val repository = RaabtaRepository(dao)
     private val cloud = CloudAuthService()
+    private val chat = CloudChatService()
+    private var syncJob: Job? = null
 
     private val _friendSearch = MutableStateFlow(FriendSearchState())
     val friendSearch: StateFlow<FriendSearchState> = _friendSearch.asStateFlow()
@@ -108,11 +112,67 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
         repository.saveSignedInUser(user.uid, user.name, user.email)
         _currentUserId.value = user.uid
         _authState.value = AuthUiState()
+        startSync(user.uid)
         viewModelScope.launch {
             cloud.ensureProfile(user).onFailure { e ->
                 _toastMessage.value = "Profile online save nahi hua: ${e.message}"
             }
         }
+    }
+
+    /** Listens for friend requests and new messages while the app is running. */
+    private fun startSync(uid: String) {
+        syncJob?.cancel()
+        syncJob = viewModelScope.launch {
+            launch {
+                chat.observeFriendships(uid)
+                    .catch { _toastMessage.value = readableCloudError(it) }
+                    .collect { repository.syncFriendships(uid, it) }
+            }
+            launch {
+                chat.observeInbox(uid)
+                    .catch { _toastMessage.value = readableCloudError(it) }
+                    .collect { messages ->
+                        if (messages.isNotEmpty()) {
+                            messages.forEach { repository.saveMessage(uid, it) }
+                            chat.removeDelivered(uid, messages.map { it.id })
+                        }
+                    }
+            }
+        }
+    }
+
+    suspend fun sendFriendRequest(fromUserId: String, toUserId: String): Result<Unit> {
+        if (fromUserId == toUserId) {
+            return Result.failure(IllegalArgumentException("Aap khud ko add nahi kar sakte"))
+        }
+        val existing = repository.findFriendRelation(fromUserId, toUserId)
+        if (existing != null) {
+            val reason = if (existing.status == "ACCEPTED") "Aap pehle se friends hain" else "Request pehle se pending hai"
+            return Result.failure(IllegalStateException(reason))
+        }
+        val target = repository.getUserById(toUserId)
+            ?: return Result.failure(IllegalArgumentException("User nahi mila"))
+        return chat.sendRequest(fromUserId, toUserId, target.name)
+    }
+
+    suspend fun respondFriendRequest(relationId: String, accept: Boolean): Result<Unit> =
+        if (accept) chat.acceptRequest(relationId) else chat.removeFriendship(relationId)
+
+    suspend fun sendMessage(senderId: String, receiverId: String, text: String): Result<Unit> {
+        val clean = text.trim().take(2000)
+        if (clean.isBlank()) return Result.failure(IllegalArgumentException("Message khali hai"))
+        val relation = repository.findFriendRelation(senderId, receiverId)
+        if (relation == null || relation.status != "ACCEPTED") {
+            return Result.failure(IllegalStateException("Pehle friend request accept honi chahiye"))
+        }
+        return chat.sendMessage(senderId, receiverId, relation.id, clean).fold(
+            onSuccess = {
+                repository.saveMessage(receiverId, it)
+                Result.success(Unit)
+            },
+            onFailure = { Result.failure(it) }
+        )
     }
 
     private fun showAuthError(message: String?) {
@@ -208,6 +268,7 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun logout() {
+        syncJob?.cancel()
         cloud.signOut()
         clearFriendSearch()
         _currentUserId.value = null

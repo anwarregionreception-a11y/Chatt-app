@@ -325,8 +325,16 @@ fun ChatsTab(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(friendSearch.results, key = { it.id }) { person ->
+                            val relation = friendRelations.firstOrNull {
+                                it.userA == person.id || it.userB == person.id
+                            }
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        closeDialog()
+                                        selectedProfileUser = person
+                                    },
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
@@ -335,6 +343,22 @@ fun ChatsTab(
                                     Text(person.name, style = MaterialTheme.typography.titleSmall)
                                     if (person.email.isNotBlank()) {
                                         Text(person.email, style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                when {
+                                    relation == null -> Button(onClick = { onSendFriendRequest(person.id) }) {
+                                        Text("Add")
+                                    }
+                                    relation.status == "ACCEPTED" -> TextButton(
+                                        onClick = {
+                                            closeDialog()
+                                            onOpenDirectChat(person.id)
+                                        }
+                                    ) { Text("Chat") }
+                                    relation.requestedBy == currentUser.id ->
+                                        Text("Sent", style = MaterialTheme.typography.labelMedium)
+                                    else -> Button(onClick = { onAcceptFriend(relation.id) }) {
+                                        Text("Accept")
                                     }
                                 }
                             }

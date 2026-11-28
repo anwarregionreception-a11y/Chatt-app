@@ -44,6 +44,9 @@ interface AppDao {
     @Query("SELECT * FROM friend_relations WHERE (userA = :u1 AND userB = :u2) OR (userA = :u2 AND userB = :u1) LIMIT 1")
     suspend fun findFriendRelation(u1: String, u2: String): FriendRelationEntity?
 
+    @Query("SELECT * FROM friend_relations WHERE userA = :userId OR userB = :userId")
+    suspend fun getFriendRelations(userId: String): List<FriendRelationEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertFriendRelation(relation: FriendRelationEntity)
 

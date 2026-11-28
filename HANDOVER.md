@@ -31,9 +31,14 @@ Last updated: 28 November 2026.
 - Display name changed to Millionaire. GitHub build passed.
 - Owner has an account in Firebase Authentication (UID above).
 
+- Phase 2 code: online friend requests and 1-to-1 chat (messages are deleted from the server after
+  delivery and kept in Room on the phone). Needs the new `firestore.rules` published and a two-phone test.
+- Search tested successfully on the owner's setup.
+
 ## Pending
-- Test phase 1 on two phones, then merge into `main`.
-- Friend requests are disabled on purpose. Chat, groups, coins and ratings are still local to each phone.
+- Test phase 2 on two phones, then merge into `main` (ask first).
+- No push notifications yet: messages arrive while the app is running or when it is next opened.
+- Groups, coins and ratings are still local to each phone.
 - Recommended: make the repo private and change any previously used passwords.
 - KSP 2.3.5 shows a red annotation in the build, which still passes (optional upgrade: 2.3.12).
 
@@ -50,7 +55,7 @@ Last updated: 28 November 2026.
 - H. Rating page: top 10 coin buyers, top 10 authority users, top 10 popular groups.
 
 ## Phases
-2. Friend requests, 1-to-1 chat
+2. Friend requests, 1-to-1 chat (code written, testing pending)
 3. Online groups (D, E)
 4. Owner role and Admin Panel (A)
 5. Coins, spin (F), rating (H)

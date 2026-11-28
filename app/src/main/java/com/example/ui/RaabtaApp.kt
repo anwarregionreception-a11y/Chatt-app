@@ -190,17 +190,17 @@ private fun AuthenticatedNavHost(
                             onOpenSystemInbox = { navController.navigate(Routes.SYSTEM_INBOX) },
                             onAcceptFriend = { relId ->
                                 viewModel.runAction("Friend request accepted") {
-                                    viewModel.repository.respondFriendRequest(relId, true, friendRelations)
+                                    viewModel.respondFriendRequest(relId, true)
                                 }
                             },
                             onDeclineFriend = { relId ->
                                 viewModel.runAction("Request declined") {
-                                    viewModel.repository.respondFriendRequest(relId, false, friendRelations)
+                                    viewModel.respondFriendRequest(relId, false)
                                 }
                             },
                             onSendFriendRequest = { targetId ->
                                 viewModel.runAction("Friend request sent") { uid ->
-                                    viewModel.repository.sendFriendRequest(uid, targetId)
+                                    viewModel.sendFriendRequest(uid, targetId)
                                 }
                             }
                         )
@@ -275,11 +275,11 @@ private fun AuthenticatedNavHost(
                 isFriend = isFriend,
                 onBack = { navController.popBackStack() },
                 onSendMessage = { text ->
-                    viewModel.runAction { uid -> viewModel.repository.sendDirectMessage(uid, peerId, text) }
+                    viewModel.runAction { uid -> viewModel.sendMessage(uid, peerId, text) }
                 },
                 onSendFriendRequest = { targetId ->
                     viewModel.runAction("Friend request sent") { uid ->
-                        viewModel.repository.sendFriendRequest(uid, targetId)
+                        viewModel.sendFriendRequest(uid, targetId)
                     }
                 }
             )
@@ -359,7 +359,7 @@ private fun AuthenticatedNavHost(
                 onOpenDirectChat = { peerId -> navController.navigate(Routes.directChat(peerId)) },
                 onSendFriendRequest = { targetId ->
                     viewModel.runAction("Friend request sent") { uid ->
-                        viewModel.repository.sendFriendRequest(uid, targetId)
+                        viewModel.sendFriendRequest(uid, targetId)
                     }
                 }
             )
@@ -376,7 +376,7 @@ private fun AuthenticatedNavHost(
                 },
                 onSendFriendRequest = { targetId ->
                     viewModel.runAction("Friend request sent") { uid ->
-                        viewModel.repository.sendFriendRequest(uid, targetId)
+                        viewModel.sendFriendRequest(uid, targetId)
                     }
                 },
                 onOpenDirectChat = { peerId -> navController.navigate(Routes.directChat(peerId)) }
