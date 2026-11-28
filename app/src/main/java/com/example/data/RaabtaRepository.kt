@@ -41,9 +41,22 @@ class RaabtaRepository(private val dao: AppDao) {
     private fun roleFor(userId: String): String =
         if (userId == AppConstants.OWNER_UID) UserRoles.OWNER else UserRoles.USER
 
-    suspend fun setBalance(userId: String, walletCoins: Long, authorityCoins: Long) {
+    /** Copies the signed-in account's online settings and wallet onto the local record. */
+    suspend fun applyOwnAccount(userId: String, name: String, showCoins: Boolean, coins: Long, authority: Long) {
         val user = dao.getUserById(userId) ?: return
-        dao.upsertUser(user.copy(walletCoins = walletCoins, authorityCoins = authorityCoins))
+        dao.upsertUser(
+            user.copy(
+                name = name,
+                showCoinsOnProfile = showCoins,
+                walletCoins = coins,
+                authorityCoins = authority
+            )
+        )
+    }
+
+    suspend fun setProfilePhoto(userId: String, uri: String) {
+        val user = dao.getUserById(userId) ?: return
+        dao.upsertUser(user.copy(profileImageUri = uri))
     }
 
     /** Copies an online public profile onto the local record. */

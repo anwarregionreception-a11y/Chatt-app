@@ -18,9 +18,6 @@ import com.example.data.remote.CloudPresenceService
 import com.example.data.remote.PresenceUser
 import com.example.domain.AuthorityEngine
 import com.example.ui.OwnerPanelState
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,6 +31,11 @@ fun OwnerPanelScreen(
     onShowDevice: (String) -> Unit,
     onCloseDevice: () -> Unit
 ) {
+    val viewModel = LocalAppViewModel.current
+    var tab by remember { mutableIntStateOf(0) }
+    var profile by remember { mutableStateOf<Pair<String, String>?>(null) }
+    val data = rememberAdminData(tab)
+    val openProfile = { uid: String, name: String -> profile = uid to name }
     var coins by remember(currentUser.walletCoins) { mutableStateOf(currentUser.walletCoins.toString()) }
     var authority by remember(currentUser.authorityCoins) { mutableStateOf(currentUser.authorityCoins.toString()) }
     var search by remember { mutableStateOf("") }
@@ -60,11 +62,23 @@ fun OwnerPanelScreen(
             )
         }
     ) { padding ->
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+        ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
+            listOf("Users", "Reports", "Staff", "Top-up", "Message").forEachIndexed { index, title ->
+                Tab(selected = tab == index, onClick = { tab = index }, text = { Text(title) })
+            }
+        }
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            when (tab) {
+                1 -> reportSection(viewModel, data, openProfile)
+                2 -> staffSection(viewModel, data, openProfile)
+                3 -> topUpSection(viewModel, data)
+                4 -> messageSection(viewModel, data)
+                else -> {
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(
@@ -133,6 +147,9 @@ fun OwnerPanelScreen(
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary
                         )
+                        TextButton(onClick = { openProfile(person.uid, person.name) }) {
+                            Text("Profile / Staff appoint")
+                        }
                     }
                 }
             }
@@ -143,7 +160,19 @@ fun OwnerPanelScreen(
                     }
                 }
             }
+                }
+            }
         }
+        }
+    }
+
+    profile?.let { (uid, name) ->
+        ProfileDialog(
+            uid = uid,
+            fallbackName = name,
+            onDismiss = { profile = null },
+            isFriend = false
+        )
     }
 
     state.deviceAccounts?.let { accounts ->
@@ -187,6 +216,3 @@ private fun PresenceDetails(person: PresenceUser) {
     Text("Registration: ${formatDateTime(person.registeredAt)}", style = MaterialTheme.typography.bodySmall)
     Text("ID: ${person.uid}", style = MaterialTheme.typography.labelSmall)
 }
-
-private fun formatDateTime(time: Long): String =
-    if (time <= 0L) "-" else SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date(time))

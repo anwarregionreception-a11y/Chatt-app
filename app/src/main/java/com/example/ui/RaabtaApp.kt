@@ -1,5 +1,10 @@
 package com.example.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -7,8 +12,10 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -31,9 +38,13 @@ object Routes {
     const val HOME = "home"
     const val DIRECT_CHAT = "chat/{peerId}"
     const val GROUP_CHAT = "group/{groupId}"
-    const val SYSTEM_INBOX = "system_inbox"
-    const val BUY_COINS = "buy_coins"
-    const val SETTINGS = "settings"
+    const val ANNOUNCEMENTS = "announcements"
+    const val TOP_UP = "top_up"
+    const val PROFILE = "profile"
+    const val PEOPLE = "people"
+    const val SPIN = "spin"
+    const val SUPPORT = "support"
+    const val ACCOUNTS = "accounts"
     const val AUTHORITY_GUIDE = "authority_guide"
     const val ADMIN_PANEL = "admin_panel"
     const val FAQ = "faq"
@@ -57,6 +68,21 @@ fun RaabtaAppRoot(viewModel: RaabtaViewModel) {
     val toastMsg by viewModel.toastMessage.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // Android 13 and newer ask before notifications can be shown
+    val context = LocalContext.current
+    val askNotifications = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+    LaunchedEffect(currentUser != null) {
+        if (currentUser != null && Build.VERSION.SDK_INT >= 33 &&
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+    val savedAccounts by viewModel.savedAccounts.collectAsStateWithLifecycle()
+
     // Report "online" only while the app is visible
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(currentUser?.id, lifecycleOwner) {
@@ -77,6 +103,7 @@ fun RaabtaAppRoot(viewModel: RaabtaViewModel) {
         }
     }
 
+    CompositionLocalProvider(LocalAppViewModel provides viewModel) {
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
@@ -88,6 +115,8 @@ fun RaabtaAppRoot(viewModel: RaabtaViewModel) {
                         authState = authState,
                         onLogin = viewModel::login,
                         onRegister = viewModel::register,
+                        savedAccounts = savedAccounts,
+                        onSelectAccount = viewModel::switchAccount,
                         onForgotPassword = viewModel::requestForgotPassword,
                         onClearError = viewModel::clearAuthError,
                         onClearInfo = viewModel::clearInfoMessage
@@ -102,6 +131,7 @@ fun RaabtaAppRoot(viewModel: RaabtaViewModel) {
             }
         }
     }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -114,17 +144,32 @@ private fun AuthenticatedNavHost(
     val allUsers by viewModel.allUsers.collectAsStateWithLifecycle()
     val friendRelations by viewModel.friendRelations.collectAsStateWithLifecycle()
     val directMessages by viewModel.userDirectMessages.collectAsStateWithLifecycle()
-    val allGroups by viewModel.allGroups.collectAsStateWithLifecycle()
-    val allGroupMembers by viewModel.allGroupMembers.collectAsStateWithLifecycle()
-    val coinOrders by viewModel.allCoinOrders.collectAsStateWithLifecycle()
-    val ownerComplaints by viewModel.ownerComplaints.collectAsStateWithLifecycle()
+    val myUserId by viewModel.myUserId.collectAsStateWithLifecycle()
     val allRatings by viewModel.allRatings.collectAsStateWithLifecycle()
 
     val friendSearch by viewModel.friendSearch.collectAsStateWithLifecycle()
 
     val ownerPanel by viewModel.ownerPanel.collectAsStateWithLifecycle()
 
-    var selectedTab by remember { mutableStateOf(HomeTab.CHAT) }
+    var selectedTab by rememberSaveable { mutableStateOf(HomeTab.CHAT) }
+    var rankedProfile by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var askedForUserId by rememberSaveable { mutableStateOf(false) }
+
+    // Accounts made before User IDs existed are invited to choose one
+    if (myUserId == "" && !askedForUserId) {
+        AlertDialog(
+            onDismissRequest = { askedForUserId = true },
+            title = { Text("Apni User ID banayen") },
+            text = { Text("User ID se log aap ko dhoond sakte hain aur aap us se login bhi kar sakte hain.") },
+            confirmButton = {
+                Button(onClick = {
+                    askedForUserId = true
+                    navController.navigate(Routes.PROFILE)
+                }) { Text("Banayen") }
+            },
+            dismissButton = { TextButton(onClick = { askedForUserId = true }) { Text("Baad mein") } }
+        )
+    }
 
     NavHost(navController = navController, startDestination = Routes.HOME) {
         composable(Routes.HOME) {
@@ -146,7 +191,7 @@ private fun AuthenticatedNavHost(
                                 shape = RoundedCornerShape(50),
                                 color = MaterialTheme.colorScheme.secondaryContainer,
                                 modifier = Modifier.padding(end = 8.dp),
-                                onClick = { navController.navigate(Routes.BUY_COINS) }
+                                onClick = { navController.navigate(Routes.TOP_UP) }
                             ) {
                                 Row(
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -203,13 +248,12 @@ private fun AuthenticatedNavHost(
                             allUsers = allUsers,
                             friendRelations = friendRelations,
                             directMessages = directMessages,
-                            complaints = ownerComplaints,
                             friendSearch = friendSearch,
                             onSearchUsers = viewModel::searchUsers,
                             onClearSearch = viewModel::clearFriendSearch,
                             onViewProfile = viewModel::refreshProfile,
                             onOpenDirectChat = { peerId -> navController.navigate(Routes.directChat(peerId)) },
-                            onOpenSystemInbox = { navController.navigate(Routes.SYSTEM_INBOX) },
+                            onOpenSystemInbox = { navController.navigate(Routes.ANNOUNCEMENTS) },
                             onAcceptFriend = { relId ->
                                 viewModel.runAction("Friend request accepted") {
                                     viewModel.respondFriendRequest(relId, true)
@@ -226,53 +270,50 @@ private fun AuthenticatedNavHost(
                                 }
                             }
                         )
-                        HomeTab.GROUP -> GroupsTab(
-                            currentUser = user,
-                            groups = allGroups,
-                            allMembers = allGroupMembers,
-                            onOpenGroup = { gid -> navController.navigate(Routes.groupChat(gid)) },
-                            onJoinGroup = { gid, bypass ->
-                                viewModel.runAction(if (bypass) "1-Hour Glorious Entry Unlocked" else "Joined group") { uid ->
-                                    val res = viewModel.repository.joinGroup(uid, gid, bypass)
-                                    if (res.isSuccess) {
-                                        navController.navigate(Routes.groupChat(gid))
-                                    }
-                                    res
-                                }
-                            },
-                            onBuyGroup = { name, desc, isPub ->
-                                viewModel.runAction("Group purchased! (200 Coins)") { uid ->
-                                    viewModel.repository.buyGroup(uid, name, desc, isPub)
-                                }
-                            }
+                        HomeTab.GROUP -> OnlineGroupsTab(
+                            onOpenGroup = { gid -> navController.navigate(Routes.groupChat(gid)) }
                         )
                         HomeTab.MENU -> MenuTab(
                             currentUser = user,
                             onInvestAuthority = { amt ->
                                 viewModel.runAction("Authority upgraded!") { uid ->
-                                    viewModel.repository.investCoinsIntoAuthority(uid, amt)
+                                    viewModel.account.investAuthority(uid, amt)
                                 }
                             },
-                            onOpenBuyCoins = { navController.navigate(Routes.BUY_COINS) },
-                            onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                            userId = myUserId.orEmpty(),
+                            onOpenProfile = { navController.navigate(Routes.PROFILE) },
+                            onOpenPeople = { navController.navigate(Routes.PEOPLE) },
+                            onOpenSpin = { navController.navigate(Routes.SPIN) },
+                            onOpenSupport = { navController.navigate(Routes.SUPPORT) },
+                            onOpenAccounts = { navController.navigate(Routes.ACCOUNTS) },
+                            onOpenBuyCoins = { navController.navigate(Routes.TOP_UP) },
                             onOpenAuthorityGuide = { navController.navigate(Routes.AUTHORITY_GUIDE) },
                             onOpenAdminPanel = { navController.navigate(Routes.ADMIN_PANEL) },
                             onOpenFaq = { navController.navigate(Routes.FAQ) },
                             onLogout = viewModel::logout
                         )
-                        HomeTab.RATING -> RatingTab(
-                            ratings = allRatings,
-                            onSubmitRating = { stars, comment ->
-                                viewModel.runAction("Thanks for rating Millionaire!") { uid ->
-                                    viewModel.repository.submitAppRating(uid, stars, comment)
-                                }
+                        HomeTab.RATING -> LeaderboardTab(
+                            onOpenGroup = { gid -> navController.navigate(Routes.groupChat(gid)) },
+                            onOpenProfile = { uid, name ->
+                                viewModel.rememberPerson(uid, name)
+                                rankedProfile = uid to name
+                            },
+                            reviews = {
+                                RatingTab(
+                                    ratings = allRatings,
+                                    onSubmitRating = { stars, comment ->
+                                        viewModel.runAction("Thanks for rating Millionaire!") { uid ->
+                                            viewModel.repository.submitAppRating(uid, stars, comment)
+                                        }
+                                    }
+                                )
                             }
                         )
                         HomeTab.ADS -> AdsTab(
                             currentUser = user,
                             onAdCompleted = {
                                 viewModel.runAction("+1 Coin earned from Ad!") { uid ->
-                                    viewModel.repository.watchRewardedAd(uid)
+                                    viewModel.account.claimAdReward(uid)
                                 }
                             }
                         )
@@ -314,127 +355,47 @@ private fun AuthenticatedNavHost(
             arguments = listOf(navArgument("groupId") { type = NavType.StringType })
         ) { entry ->
             val groupId = entry.arguments?.getString("groupId") ?: return@composable
-            val group by viewModel.observeGroup(groupId).collectAsStateWithLifecycle(null)
-            val members by viewModel.observeGroupMembers(groupId).collectAsStateWithLifecycle(emptyList())
-            val messages by viewModel.observeGroupMessages(groupId).collectAsStateWithLifecycle(emptyList())
-            val donations by viewModel.observeGroupDonations(groupId).collectAsStateWithLifecycle(emptyList())
-
-            GroupChatScreen(
-                currentUser = user,
-                group = group,
-                members = members,
-                messages = messages,
-                donations = donations,
-                allUsers = allUsers,
+            OnlineGroupScreen(
+                groupId = groupId,
+                friendRelations = friendRelations,
                 onBack = { navController.popBackStack() },
-                onSendMessage = { text, tags ->
-                    viewModel.runAction { uid -> viewModel.sendGroupMessage(uid, groupId, text, tags) }
-                },
-                onRenewGroup = {
-                    viewModel.runAction("Group life renewed for 30 days!") { uid ->
-                        viewModel.repository.renewGroupLife(uid, groupId)
-                    }
-                },
-                onAddFund = { amt ->
-                    viewModel.runAction("Added $amt Coins to Group Fund!") { uid ->
-                        viewModel.repository.addGroupFund(uid, groupId, amt)
-                    }
-                },
-                onKickMember = { targetId, reason ->
-                    viewModel.runAction("Member kicked") { uid ->
-                        viewModel.repository.kickMemberInGroup(uid, groupId, targetId, reason)
-                    }
-                },
-                onBanOwnerInGroup = {
-                    viewModel.runAction("Group Owner chat-banned in this group!") { uid ->
-                        viewModel.repository.banGroupOwnerInGroup(uid, groupId)
-                    }
-                },
-                onFileComplaint = {
-                    viewModel.runAction("10-line chat complaint sent to Owner's (System) Inbox") { uid ->
-                        viewModel.repository.fileKickComplaint(uid, groupId)
-                    }
-                },
-                onToggleSupervisor = { targetId, makeSup ->
-                    viewModel.runAction(if (makeSup) "Supervisor appointed" else "Supervisor removed") { uid ->
-                        viewModel.repository.toggleSupervisor(uid, groupId, targetId, makeSup)
-                    }
-                },
-                onAddMember = { targetId ->
-                    viewModel.runAction("Member added") { uid ->
-                        viewModel.repository.inviteOrAddMember(uid, groupId, targetId)
-                    }
-                },
-                onRemoveMember = { targetId, blacklist ->
-                    viewModel.runAction(if (blacklist) "Member blacklisted" else "Member removed") { uid ->
-                        viewModel.repository.removeOrBlacklistMember(uid, groupId, targetId, blacklist)
-                    }
-                },
-                onUnblacklistMember = { targetId ->
-                    viewModel.runAction("Removed from blacklist") { uid ->
-                        viewModel.repository.unblacklistMember(uid, groupId, targetId)
-                    }
-                },
-                onUpdateSettings = { isPub, add, rem, blk, priv ->
-                    viewModel.runAction("Group settings updated") { uid ->
-                        viewModel.repository.updateGroupSettings(uid, groupId, isPub, add, rem, blk, priv)
-                    }
-                },
-                onOpenDirectChat = { peerId -> navController.navigate(Routes.directChat(peerId)) },
-                onSendFriendRequest = { targetId ->
-                    viewModel.runAction("Friend request sent") { uid ->
-                        viewModel.sendFriendRequest(uid, targetId)
-                    }
-                }
+                onOpenChat = { peerId -> navController.navigate(Routes.directChat(peerId)) }
             )
         }
 
-        composable(Routes.SYSTEM_INBOX) {
-            SystemInboxScreen(
-                complaints = ownerComplaints,
-                allUsers = allUsers,
+        composable(Routes.ANNOUNCEMENTS) {
+            AnnouncementsScreen(onBack = { navController.popBackStack() })
+        }
+
+        composable(Routes.TOP_UP) {
+            TopUpScreen(currentUser = user, onBack = { navController.popBackStack() })
+        }
+
+        composable(Routes.PROFILE) {
+            ProfileScreen(currentUser = user, onBack = { navController.popBackStack() })
+        }
+
+        composable(Routes.PEOPLE) {
+            PeopleScreen(
+                friendRelations = friendRelations,
                 onBack = { navController.popBackStack() },
-                onOpenGroup = { gid -> navController.navigate(Routes.groupChat(gid)) },
-                onResolveComplaint = { cmpId, punish ->
-                    viewModel.runAction { uid -> viewModel.repository.resolveComplaint(uid, cmpId, punish) }
-                },
-                onSendFriendRequest = { targetId ->
-                    viewModel.runAction("Friend request sent") { uid ->
-                        viewModel.sendFriendRequest(uid, targetId)
-                    }
-                },
-                onOpenDirectChat = { peerId -> navController.navigate(Routes.directChat(peerId)) }
+                onOpenChat = { peerId -> navController.navigate(Routes.directChat(peerId)) }
             )
         }
 
-        composable(Routes.BUY_COINS) {
-            BuyCoinsScreen(
-                currentUser = user,
-                orders = coinOrders,
+        composable(Routes.SPIN) {
+            SpinScreen(currentUser = user, onBack = { navController.popBackStack() })
+        }
+
+        composable(Routes.SUPPORT) {
+            SupportScreen(
                 onBack = { navController.popBackStack() },
-                onSubmitOrder = { method, coins, ref ->
-                    viewModel.runAction("Order submitted! Waiting for Owner approval.") { uid ->
-                        viewModel.repository.submitCoinOrder(uid, method, coins, ref)
-                    }
-                }
+                onOpenChat = { peerId -> navController.navigate(Routes.directChat(peerId)) }
             )
         }
 
-        composable(Routes.SETTINGS) {
-            SettingsScreen(
-                currentUser = user,
-                onBack = { navController.popBackStack() },
-                onSaveSettings = { mobile, email, showCoins, reqFriends, reqGroups, uri ->
-                    viewModel.runAction("Settings saved") { uid ->
-                        viewModel.repository.updateSettings(uid, mobile, email, showCoins, reqFriends, reqGroups, uri)
-                    }
-                },
-                onChangePassword = { curr, newP, conf ->
-                    viewModel.runAction("Password changed successfully") {
-                        viewModel.changePassword(curr, newP, conf)
-                    }
-                }
-            )
+        composable(Routes.ACCOUNTS) {
+            AccountsScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Routes.AUTHORITY_GUIDE) {
@@ -466,5 +427,18 @@ private fun AuthenticatedNavHost(
         composable(Routes.FAQ) {
             FaqScreen(onBack = { navController.popBackStack() })
         }
+    }
+
+    rankedProfile?.let { (uid, name) ->
+        UserProfileFor(
+            uid = uid,
+            name = name,
+            friendRelations = friendRelations,
+            onDismiss = { rankedProfile = null },
+            onChat = {
+                rankedProfile = null
+                navController.navigate(Routes.directChat(uid))
+            }
+        )
     }
 }

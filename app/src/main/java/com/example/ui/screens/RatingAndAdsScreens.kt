@@ -166,7 +166,7 @@ fun AdsTab(
                 )
                 Column(modifier = Modifier.align(Alignment.BottomStart).padding(16.dp)) {
                     Text("1 Ad = 1 Coin", style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold)
-                    Text("1 Coin = 50 PKR Value • Watch short ads anytime", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.88f))
+                    Text("1 Coin = 50 PKR Value • Har ghante mein 1 reward", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.88f))
                 }
             }
         }

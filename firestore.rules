@@ -2,16 +2,128 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
     // The single app Owner (Firebase Authentication UID).
     function isOwner() {
       return request.auth != null && request.auth.uid == 'AT0ZQHRqVIaSMHP2a8PYfU8MT7A2';
     }
 
+    function hasStaffRole(role) {
+      return exists(/databases/$(database)/documents/staff/$(request.auth.uid))
+        && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.role == role;
+    }
+
+    function isStaffMember(userId) {
+      return exists(/databases/$(database)/documents/staff/$(userId));
+    }
+
+    // Chat ban that is still running. allChat also covers one-to-one messages.
+    function groupBanned() {
+      return exists(/databases/$(database)/documents/bans/$(request.auth.uid))
+        && get(/databases/$(database)/documents/bans/$(request.auth.uid)).data.until > request.time;
+    }
+
+    function fullyBanned() {
+      return groupBanned()
+        && get(/databases/$(database)/documents/bans/$(request.auth.uid)).data.allChat == true;
+    }
+
+    function noLinks(text) {
+      return !text.lower().matches('(?s).*(https?://|www[.]|t[.]me/|wa[.]me/).*');
+    }
+
+    // ---------------------------------------------------------------- Accounts
+
+    // Public profile: signed-in users can find and list each other.
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow create, update: if isSelf(userId)
+        && request.resource.data.keys().hasOnly(
+             ['name', 'nameLower', 'keywords', 'userId', 'country', 'mobile', 'email',
+              'showCoins', 'coins', 'authorityCoins', 'allowRequests', 'createdAt'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 1
+        && request.resource.data.name.size() <= 50
+        && request.resource.data.nameLower is string
+        && request.resource.data.nameLower.size() <= 50
+        && request.resource.data.keywords is list
+        && request.resource.data.keywords.size() <= 100
+        && request.resource.data.userId is string
+        && (request.resource.data.userId == ''
+            || get(/databases/$(database)/documents/owned/$(userId)).data.userId
+               == request.resource.data.userId)
+        && request.resource.data.country is string
+        && request.resource.data.country.size() <= 2
+        && request.resource.data.get('mobile', '') is string
+        && request.resource.data.get('mobile', '').size() <= 20
+        && request.resource.data.get('email', '') is string
+        && request.resource.data.get('email', '').size() <= 100
+        && request.resource.data.showCoins is bool
+        && request.resource.data.allowRequests is bool
+        && request.resource.data.createdAt is int
+        // Balances shown to others must match the protected wallet.
+        && request.resource.data.authorityCoins
+           == getAfter(/databases/$(database)/documents/wallets/$(userId)).data.authority
+        && (!('coins' in request.resource.data)
+            || request.resource.data.coins
+               == getAfter(/databases/$(database)/documents/wallets/$(userId)).data.coins);
+    }
+
+    // Private settings, including hidden mobile number and email.
+    match /private/{userId} {
+      allow read, write: if isSelf(userId);
+    }
+
+    // Unique User IDs. Readable before login so that availability and ID login work.
+    match /userids/{id} {
+      allow get: if true;
+      allow create: if signedIn()
+        && id.matches('^[a-z][a-z0-9_.]{2,19}$')
+        && request.resource.data.keys().hasOnly(['uid', 'loginEmail'])
+        && request.resource.data.uid == request.auth.uid
+        && (!('loginEmail' in request.resource.data)
+            || request.resource.data.loginEmail == request.auth.token.email)
+        && (!request.auth.token.email.matches('.*@id[.]rabbta-16040[.]firebaseapp[.]com')
+            || request.auth.token.email == id + '@id.rabbta-16040.firebaseapp.com')
+        && getAfter(/databases/$(database)/documents/owned/$(request.auth.uid)).data.userId == id;
+      allow update: if signedIn()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'loginEmail'])
+        && request.resource.data.uid == request.auth.uid
+        && (!('loginEmail' in request.resource.data)
+            || request.resource.data.loginEmail == request.auth.token.email);
+      allow delete: if isOwner();
+    }
+
+    // One User ID per account, chosen once.
+    match /owned/{userId} {
+      allow read: if isSelf(userId) || isOwner();
+      allow create: if isSelf(userId)
+        && request.resource.data.keys().hasOnly(['userId'])
+        && getAfter(/databases/$(database)/documents/userids/$(request.resource.data.userId)).data.uid
+           == userId;
+    }
+
+    // Email lookup: exact address only, no listing.
+    match /emails/{email} {
+      allow get: if signedIn();
+      allow create, update: if signedIn()
+        && email == request.auth.token.email.lower()
+        && request.resource.data.keys().hasOnly(['uid'])
+        && request.resource.data.uid == request.auth.uid;
+    }
+
     // "Last seen" and device records: only the Owner can read them.
     match /presence/{userId} {
       allow read: if isOwner();
-      allow create, update: if request.auth != null
-        && request.auth.uid == userId
+      allow create, update: if isSelf(userId)
         && request.resource.data.keys().hasOnly(['name', 'deviceId', 'createdAt', 'lastSeen'])
         && request.resource.data.name is string
         && request.resource.data.name.size() <= 50
@@ -21,37 +133,122 @@ service cloud.firestore {
         && request.resource.data.lastSeen == request.time;
     }
 
-    // Public profile: signed-in users can find each other by name.
-    match /users/{userId} {
-      allow get: if request.auth != null;
-      allow list: if request.auth != null && request.query.limit <= 20;
-      allow create, update: if request.auth != null
-        && request.auth.uid == userId
-        && request.resource.data.keys().hasOnly(
-             ['name', 'keywords', 'showCoins', 'coins', 'authorityCoins'])
-        && request.resource.data.name is string
-        && request.resource.data.name.size() >= 1
-        && request.resource.data.name.size() <= 50
-        && request.resource.data.keywords is list
-        && request.resource.data.keywords.size() <= 100
-        && request.resource.data.showCoins is bool
-        && request.resource.data.get('coins', 0) is int
-        && request.resource.data.authorityCoins is int;
+    // Which public group a user is in right now.
+    match /activity/{userId} {
+      allow read: if signedIn();
+      allow delete: if isSelf(userId);
+      allow create, update: if isSelf(userId)
+        && request.resource.data.keys().hasOnly(['groupId', 'groupName', 'at'])
+        && get(/databases/$(database)/documents/groups/$(request.resource.data.groupId)).data.isPublic == true
+        && request.resource.data.groupName
+           == get(/databases/$(database)/documents/groups/$(request.resource.data.groupId)).data.name
+        && request.resource.data.at == request.time;
     }
 
-    // Email lookup: exact address only, no listing.
-    match /emails/{email} {
-      allow get: if request.auth != null;
-      allow create, update: if request.auth != null
-        && email == request.auth.token.email.lower()
-        && request.resource.data.keys().hasOnly(['uid'])
-        && request.resource.data.uid == request.auth.uid;
+    // ---------------------------------------------------------------- Coins
+
+    // Users can only move or spend their coins. New coins come from the Owner,
+    // the daily spin or the hourly ad reward.
+    match /wallets/{userId} {
+      allow read: if isSelf(userId) || isOwner();
+      allow create: if isOwner()
+        || (isSelf(userId)
+            && request.resource.data.keys().hasOnly(['coins', 'authority'])
+            && request.resource.data.coins == 50
+            && request.resource.data.authority == 1);
+      allow update: if isOwner()
+        || (isSelf(userId)
+            && request.resource.data.keys().hasOnly(['coins', 'authority', 'lastGroupId', 'lastAdAt'])
+            && request.resource.data.coins is int
+            && request.resource.data.authority is int
+            && request.resource.data.coins >= 0
+            && (spending() || adReward() || spinReward(userId)));
     }
+
+    function spending() {
+      return request.resource.data.coins <= resource.data.coins
+        && request.resource.data.authority >= resource.data.authority
+        && request.resource.data.authority - resource.data.authority
+           <= resource.data.coins - request.resource.data.coins
+        && request.resource.data.get('lastAdAt', null) == resource.data.get('lastAdAt', null);
+    }
+
+    function adReward() {
+      return request.resource.data.coins == resource.data.coins + 1
+        && request.resource.data.authority == resource.data.authority
+        && request.resource.data.lastAdAt == request.time
+        && (!('lastAdAt' in resource.data)
+            || request.time >= resource.data.lastAdAt + duration.value(1, 'h'));
+    }
+
+    // The reward is decided by the server time of the spin, so the phone cannot choose it.
+    function spinReward(userId) {
+      let before = get(/databases/$(database)/documents/spins/$(userId)).data;
+      let after = getAfter(/databases/$(database)/documents/spins/$(userId)).data;
+      let slot = before.lastSpin.toMillis() % 5;
+      return before.claimed == false
+        && after.claimed == true
+        && request.resource.data.coins == resource.data.coins + [1, 3, 0, 0, 0][slot]
+        && request.resource.data.authority == resource.data.authority + [0, 0, 1, 3, 0][slot]
+        && request.resource.data.get('lastAdAt', null) == resource.data.get('lastAdAt', null);
+    }
+
+    match /spins/{userId} {
+      allow read: if isSelf(userId);
+      allow create: if isSelf(userId)
+        && request.resource.data.keys().hasOnly(['lastSpin', 'claimed'])
+        && request.resource.data.lastSpin == request.time
+        && request.resource.data.claimed == false;
+      allow update: if isSelf(userId)
+        && request.resource.data.keys().hasOnly(['lastSpin', 'claimed'])
+        && ((request.time >= resource.data.lastSpin + duration.value(24, 'h')
+             && request.resource.data.lastSpin == request.time
+             && request.resource.data.claimed == false)
+            || (request.resource.data.lastSpin == resource.data.lastSpin
+                && resource.data.claimed == false
+                && request.resource.data.claimed == true));
+    }
+
+    // Payment methods are added by the Owner.
+    match /paymentMethods/{methodId} {
+      allow read: if signedIn();
+      allow write: if isOwner();
+    }
+
+    // Top-up requests. Only the Owner can approve them.
+    match /topups/{orderId} {
+      allow read: if isOwner() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(
+             ['uid', 'name', 'method', 'coins', 'amountPkr', 'reference', 'status', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 50
+        && request.resource.data.method is string
+        && request.resource.data.method.size() <= 60
+        && request.resource.data.coins is int
+        && request.resource.data.coins > 0
+        && request.resource.data.coins <= 1000000000
+        && request.resource.data.amountPkr == request.resource.data.coins * 50
+        && request.resource.data.reference is string
+        && request.resource.data.reference.size() >= 1
+        && request.resource.data.reference.size() <= 100
+        && request.resource.data.status == 'PENDING'
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if isOwner();
+    }
+
+    match /buyers/{userId} {
+      allow read: if signedIn();
+      allow write: if isOwner();
+    }
+
+    // ---------------------------------------------------------------- Chat
 
     // One document per pair of users.
     match /friendships/{pairId} {
-      allow read: if request.auth != null && request.auth.uid in resource.data.members;
-      allow create: if request.auth != null
+      allow read: if signedIn() && request.auth.uid in resource.data.members;
+      allow create: if signedIn()
         && request.resource.data.keys().hasOnly(['members', 'requestedBy', 'status', 'names', 'createdAt'])
         && request.resource.data.members is list
         && request.resource.data.members.size() == 2
@@ -59,37 +256,251 @@ service cloud.firestore {
         && pairId == request.resource.data.members[0] + '_' + request.resource.data.members[1]
         && request.auth.uid in request.resource.data.members
         && request.resource.data.requestedBy == request.auth.uid
-        && request.resource.data.status == 'PENDING'
         && request.resource.data.names[request.auth.uid]
-           == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name;
-      // Only the person who received the request can accept it.
-      allow update: if request.auth != null
+           == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name
+        && ((request.resource.data.status == 'PENDING'
+             && acceptsRequests(request.resource.data.members[0])
+             && acceptsRequests(request.resource.data.members[1]))
+            // Staff can be contacted directly.
+            || (request.resource.data.status == 'ACCEPTED'
+                && involvesStaff(request.resource.data.members)));
+      // The receiver accepts a request. A staff contact can be opened by either side.
+      allow update: if signedIn()
         && request.auth.uid in resource.data.members
-        && request.auth.uid != resource.data.requestedBy
         && resource.data.status == 'PENDING'
         && request.resource.data.status == 'ACCEPTED'
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
-      allow delete: if request.auth != null && request.auth.uid in resource.data.members;
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        && (request.auth.uid != resource.data.requestedBy
+            || involvesStaff(resource.data.members));
+      allow delete: if signedIn() && request.auth.uid in resource.data.members;
+    }
+
+    function acceptsRequests(userId) {
+      return userId == request.auth.uid
+        || get(/databases/$(database)/documents/users/$(userId)).data.get('allowRequests', true) == true;
+    }
+
+    // True when the other person of the pair is a staff member.
+    function involvesStaff(members) {
+      return (members[0] != request.auth.uid && isStaffMember(members[0]))
+        || (members[1] != request.auth.uid && isStaffMember(members[1]));
     }
 
     // Messages wait here until the receiver's phone has saved them.
     match /inbox/{userId}/messages/{messageId} {
-      allow read, delete: if request.auth != null && request.auth.uid == userId;
-      allow create: if request.auth != null
+      allow read, delete: if isSelf(userId);
+      allow create: if signedIn()
         && request.auth.uid != userId
         && request.resource.data.keys().hasOnly(['senderId', 'pairId', 'text', 'sentAt'])
         && request.resource.data.senderId == request.auth.uid
         && request.resource.data.text is string
         && request.resource.data.text.size() >= 1
         && request.resource.data.text.size() <= 2000
-        && !request.resource.data.text.lower().matches('(?s).*(https?://|www[.]|t[.]me/|wa[.]me/).*')
+        && noLinks(request.resource.data.text)
         && request.resource.data.sentAt is int
+        && !fullyBanned()
         && isFriendPair(request.resource.data.pairId, request.auth.uid, userId);
     }
 
     function isFriendPair(pairId, sender, receiver) {
       let pair = get(/databases/$(database)/documents/friendships/$(pairId)).data;
       return pair.status == 'ACCEPTED' && sender in pair.members && receiver in pair.members;
+    }
+
+    // ---------------------------------------------------------------- Groups
+
+    match /groups/{groupId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(
+             ['name', 'description', 'isPublic', 'ownerUid', 'ownerName', 'memberCount',
+              'lastMember', 'createdAt'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 1
+        && request.resource.data.name.size() <= 40
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 200
+        && request.resource.data.isPublic is bool
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerName is string
+        && request.resource.data.ownerName.size() <= 50
+        && request.resource.data.memberCount == 1
+        && request.resource.data.lastMember == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && existsAfter(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid))
+        // Costs 200 coins (free for the app Owner).
+        && (isOwner() || paidForGroup(groupId));
+      // Only the member counter changes, together with one member record.
+      allow update: if signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberCount', 'lastMember'])
+        && ((request.resource.data.memberCount == resource.data.memberCount + 1
+             && !exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.resource.data.lastMember))
+             && existsAfter(/databases/$(database)/documents/groups/$(groupId)/members/$(request.resource.data.lastMember)))
+            || (request.resource.data.memberCount == resource.data.memberCount - 1
+             && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.resource.data.lastMember))
+             && !existsAfter(/databases/$(database)/documents/groups/$(groupId)/members/$(request.resource.data.lastMember))));
+      allow delete: if isOwner();
+
+      match /members/{memberId} {
+        allow read: if signedIn()
+          && (request.auth.uid == memberId || isOwner() || hasStaffRole('MODERATOR')
+              || isMember(groupId));
+        allow create: if signedIn()
+          && request.resource.data.keys().hasOnly(['name', 'joinedAt'])
+          && request.resource.data.name
+             == get(/databases/$(database)/documents/users/$(memberId)).data.name
+          && request.resource.data.joinedAt == request.time
+          && counterMoves(groupId, memberId, 1)
+          && mayAdd(groupId, memberId);
+        allow delete: if signedIn()
+          && memberId != get(/databases/$(database)/documents/groups/$(groupId)).data.ownerUid
+          && (request.auth.uid == memberId || isOwner() || managesGroup(groupId))
+          && counterMoves(groupId, memberId, -1);
+      }
+
+      match /requests/{memberId} {
+        allow read: if signedIn()
+          && (request.auth.uid == memberId || isOwner() || managesGroup(groupId));
+        allow create, update: if isSelf(memberId)
+          && request.resource.data.keys().hasOnly(['name', 'at'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() <= 50;
+        allow delete: if signedIn()
+          && (request.auth.uid == memberId || isOwner() || managesGroup(groupId));
+      }
+
+      match /messages/{messageId} {
+        allow read: if signedIn()
+          && (isOwner() || hasStaffRole('MODERATOR')
+              || (isMember(groupId) && !isKicked(groupId)));
+        allow create: if signedIn()
+          && request.resource.data.keys().hasOnly(['senderId', 'senderName', 'text', 'sentAt'])
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.senderName
+             == get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.name
+          && request.resource.data.text is string
+          && request.resource.data.text.size() >= 1
+          && request.resource.data.text.size() <= 2000
+          && noLinks(request.resource.data.text)
+          && request.resource.data.sentAt == request.time
+          && !isKicked(groupId)
+          && !groupBanned();
+        allow delete: if signedIn()
+          && (isOwner() || hasStaffRole('MODERATOR') || managesGroup(groupId));
+      }
+
+      // Moderator kick: at most two hours.
+      match /kicks/{memberId} {
+        allow read: if signedIn()
+          && (request.auth.uid == memberId || isOwner() || hasStaffRole('MODERATOR'));
+        allow create, update: if isOwner()
+          || (signedIn()
+              && hasStaffRole('MODERATOR')
+              && memberId != 'AT0ZQHRqVIaSMHP2a8PYfU8MT7A2'
+              && request.resource.data.keys().hasOnly(['until', 'by'])
+              && request.resource.data.by == request.auth.uid
+              && request.resource.data.until <= request.time + duration.value(130, 'm'));
+        allow delete: if isOwner();
+      }
+    }
+
+    function paidForGroup(groupId) {
+      let before = get(/databases/$(database)/documents/wallets/$(request.auth.uid)).data;
+      let after = getAfter(/databases/$(database)/documents/wallets/$(request.auth.uid)).data;
+      return after.coins <= before.coins - 200 && after.lastGroupId == groupId;
+    }
+
+    function isMember(groupId) {
+      return exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid));
+    }
+
+    function managesGroup(groupId) {
+      return get(/databases/$(database)/documents/groups/$(groupId)).data.ownerUid == request.auth.uid;
+    }
+
+    function isKicked(groupId) {
+      return exists(/databases/$(database)/documents/groups/$(groupId)/kicks/$(request.auth.uid))
+        && get(/databases/$(database)/documents/groups/$(groupId)/kicks/$(request.auth.uid)).data.until
+           > request.time;
+    }
+
+    // Joining, approving a request, or creating the group.
+    function mayAdd(groupId, memberId) {
+      return isOwner()
+        || (!exists(/databases/$(database)/documents/groups/$(groupId))
+            && memberId == request.auth.uid)
+        || (exists(/databases/$(database)/documents/groups/$(groupId))
+            && ((memberId == request.auth.uid
+                 && get(/databases/$(database)/documents/groups/$(groupId)).data.isPublic == true)
+                || (managesGroup(groupId)
+                    && exists(/databases/$(database)/documents/groups/$(groupId)/requests/$(memberId)))));
+    }
+
+    function counterMoves(groupId, memberId, step) {
+      let after = getAfter(/databases/$(database)/documents/groups/$(groupId)).data;
+      return after.lastMember == memberId
+        && ((!exists(/databases/$(database)/documents/groups/$(groupId)) && step == 1)
+            || after.memberCount
+               == get(/databases/$(database)/documents/groups/$(groupId)).data.memberCount + step);
+    }
+
+    // ---------------------------------------------------------------- Staff
+
+    // Appointed only by the Owner.
+    match /staff/{userId} {
+      allow read: if signedIn();
+      allow write: if isOwner();
+    }
+
+    match /staffApplications/{userId} {
+      allow read: if isSelf(userId) || isOwner();
+      allow create, update: if isSelf(userId)
+        && request.resource.data.keys().hasOnly(['name', 'userId', 'role', 'note', 'createdAt'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 50
+        && request.resource.data.userId is string
+        && request.resource.data.userId.size() <= 20
+        && request.resource.data.role in ['MODERATOR', 'COP', 'MENTOR']
+        && request.resource.data.note is string
+        && request.resource.data.note.size() <= 500
+        && request.resource.data.createdAt == request.time;
+      allow delete: if isSelf(userId) || isOwner();
+    }
+
+    // Cop reports go to the Owner only.
+    match /reports/{reportId} {
+      allow create: if signedIn()
+        && hasStaffRole('COP')
+        && request.resource.data.keys().hasOnly(
+             ['copUid', 'copName', 'targetUid', 'targetName', 'targetUserId', 'reason', 'createdAt'])
+        && request.resource.data.copUid == request.auth.uid
+        && request.resource.data.targetUid is string
+        && request.resource.data.reason is string
+        && request.resource.data.reason.size() >= 5
+        && request.resource.data.reason.size() <= 1000
+        && request.resource.data.createdAt == request.time;
+      allow read, update, delete: if isOwner();
+    }
+
+    // Moderators can ban from group chat for at most two hours, after a kick.
+    match /bans/{userId} {
+      allow read: if isSelf(userId) || isOwner() || (signedIn() && hasStaffRole('MODERATOR'));
+      allow write: if isOwner();
+      allow create, update: if signedIn()
+        && hasStaffRole('MODERATOR')
+        && userId != 'AT0ZQHRqVIaSMHP2a8PYfU8MT7A2'
+        && (resource == null || resource.data.until <= request.time)
+        && request.resource.data.keys().hasOnly(['until', 'allChat', 'by', 'groupId'])
+        && request.resource.data.allChat == false
+        && request.resource.data.by == request.auth.uid
+        && request.resource.data.until <= request.time + duration.value(130, 'm')
+        && exists(/databases/$(database)/documents/groups/$(request.resource.data.groupId)/kicks/$(userId));
+    }
+
+    // Messages from the Owner to everyone.
+    match /announcements/{announcementId} {
+      allow read: if signedIn();
+      allow write: if isOwner();
     }
 
     // Everything else stays closed.

@@ -26,13 +26,16 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.rabbta.chatapp.v1.R
+import com.example.data.SavedAccount
 import com.example.ui.AuthUiState
 
 @Composable
 fun LoginScreen(
     authState: AuthUiState,
     onLogin: (String, String) -> Unit,
-    onRegister: (String, String, String) -> Unit,
+    onRegister: (String, String, String, String, Boolean) -> Unit,
+    savedAccounts: List<SavedAccount>,
+    onSelectAccount: (String) -> Unit,
     onForgotPassword: (String) -> Unit,
     onClearError: () -> Unit,
     onClearInfo: () -> Unit,
@@ -195,7 +198,7 @@ fun LoginScreen(
                         identifier = it
                         onClearError()
                     },
-                    label = { Text("Email") },
+                    label = { Text("Email ya User ID") },
                     leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null) },
                     singleLine = true,
                     modifier = Modifier
@@ -270,6 +273,22 @@ fun LoginScreen(
             }
         }
 
+        if (savedAccounts.isNotEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            Column(
+                modifier = Modifier.fillMaxWidth().widthIn(max = 540.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("Is phone ki saved IDs", style = MaterialTheme.typography.titleSmall)
+                savedAccounts.forEach { account ->
+                    PersonRow(
+                        name = account.name,
+                        subtitle = accountSubtitle(account),
+                        onClick = { if (!authState.isLoading) onSelectAccount(account.uid) }
+                    )
+                }
+            }
+        }
     }
 
     if (showForgotDialog) {
@@ -314,14 +333,19 @@ fun LoginScreen(
 
     if (showRegisterDialog) {
         var name by remember { mutableStateOf("") }
+        var userId by remember { mutableStateOf("") }
+        var userIdFree by remember { mutableStateOf(false) }
         var email by remember { mutableStateOf("") }
+        var idLogin by remember { mutableStateOf(false) }
         var regPass by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { showRegisterDialog = false },
-            icon = { Icon(Icons.Filled.PersonAdd, contentDescription = null) },
             title = { Text("Create New Account") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it },
@@ -329,14 +353,28 @@ fun LoginScreen(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+                    UserIdField(value = userId, onValueChange = { userId = it }) { userIdFree = it }
                     OutlinedTextField(
                         value = email,
                         onValueChange = { email = it },
-                        label = { Text("Email") },
+                        label = { Text("Email (optional)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+                    if (email.isBlank()) {
+                        Text(
+                            "Email nahi denge to password bhoolne par account wapas nahi milega.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    } else {
+                        SwitchRow("User ID se bhi login", idLogin) { idLogin = it }
+                        Text(
+                            "On karne par aap ki User ID jaanne wala technical tareeqe se aap ki email maloom kar sakta hai.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                     OutlinedTextField(
                         value = regPass,
                         onValueChange = { regPass = it },
@@ -350,9 +388,10 @@ fun LoginScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        onRegister(name, email, regPass)
+                        onRegister(name, userId, email, regPass, idLogin)
                         showRegisterDialog = false
                     },
+                    enabled = userIdFree && name.isNotBlank() && regPass.isNotEmpty(),
                     modifier = Modifier.testTag("confirm_register_button")
                 ) {
                     Text("Sign Up")

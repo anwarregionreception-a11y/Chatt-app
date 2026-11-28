@@ -1,23 +1,38 @@
 package com.example.ui
 
 import android.app.Application
+import android.content.Context
 import android.os.SystemClock
 import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.AccountStore
 import com.example.data.RaabtaRepository
+import com.example.data.SavedAccount
 import com.example.data.local.*
+import com.example.data.remote.Announcement
+import com.example.data.remote.ChatBan
+import com.example.data.remote.CloudAccountService
 import com.example.data.remote.CloudAuthService
 import com.example.data.remote.CloudChatService
+import com.example.data.remote.CloudCommunityService
+import com.example.data.remote.CloudGroupService
 import com.example.data.remote.CloudPresenceService
 import com.example.data.remote.CloudUser
 import com.example.data.remote.PresenceUser
+import com.example.data.remote.PrivateSettings
 import com.example.data.remote.PublicProfile
+import com.example.data.remote.StaffMember
+import com.example.data.remote.StaffRole
 import com.example.data.remote.readableCloudError
+import com.example.data.remote.searchKeywords
 import com.example.domain.FloodDecision
 import com.example.domain.FloodGuard
 import com.example.domain.LinkFilter
+import com.example.domain.UserIds
+import com.example.notify.Notifier
 import com.example.security.PasswordHasher
+import com.example.ui.screens.formatDateTime
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -49,6 +64,11 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
     val repository = RaabtaRepository(dao)
     private val cloud = CloudAuthService()
     private val chat = CloudChatService()
+    val account = CloudAccountService()
+    val groups = CloudGroupService()
+    val community = CloudCommunityService()
+    private val accounts = AccountStore(application)
+    private val notices = application.getSharedPreferences("notices", Context.MODE_PRIVATE)
     private var syncJob: Job? = null
     private val refreshedPeers = mutableSetOf<String>()
 
@@ -66,6 +86,22 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _currentUserId = MutableStateFlow<String?>(null)
     val currentUserId: StateFlow<String?> = _currentUserId.asStateFlow()
+
+    /** null while loading, "" when no User ID has been chosen. */
+    private val _myUserId = MutableStateFlow<String?>(null)
+    val myUserId: StateFlow<String?> = _myUserId.asStateFlow()
+
+    private val _mySettings = MutableStateFlow<PrivateSettings?>(null)
+    val mySettings: StateFlow<PrivateSettings?> = _mySettings.asStateFlow()
+
+    private val _myRole = MutableStateFlow<StaffRole?>(null)
+    val myRole: StateFlow<StaffRole?> = _myRole.asStateFlow()
+
+    private val _myBan = MutableStateFlow<ChatBan?>(null)
+    val myBan: StateFlow<ChatBan?> = _myBan.asStateFlow()
+
+    private val _savedAccounts = MutableStateFlow(accounts.list())
+    val savedAccounts: StateFlow<List<SavedAccount>> = _savedAccounts.asStateFlow()
 
     private val _authState = MutableStateFlow(AuthUiState())
     val authState: StateFlow<AuthUiState> = _authState.asStateFlow()
@@ -91,21 +127,6 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
     val userDirectMessages: StateFlow<List<DirectMessageEntity>> = _currentUserId
         .flatMapLatest { uid ->
             if (uid == null) flowOf(emptyList()) else repository.observeUserDirectMessages(uid)
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val allGroups: StateFlow<List<GroupEntity>> = repository.observeAllGroups()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val allGroupMembers: StateFlow<List<GroupMemberEntity>> = repository.observeAllGroupMembers()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val allCoinOrders: StateFlow<List<CoinOrderEntity>> = repository.observeAllCoinOrders()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val ownerComplaints: StateFlow<List<SystemComplaintEntity>> = _currentUserId
-        .flatMapLatest { uid ->
-            if (uid == null) flowOf(emptyList()) else repository.observeOwnerComplaints(uid)
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -135,11 +156,27 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
         _authState.update { it.copy(infoMessage = null) }
     }
 
+    /** The address the account signs in with; empty for accounts without a real email. */
+    fun realLoginEmail(): String =
+        cloud.currentUser()?.email?.takeUnless { UserIds.isSynthetic(it) }.orEmpty()
+
     private suspend fun openSession(user: CloudUser) {
-        val isNewOnThisPhone = repository.saveSignedInUser(user.uid, user.name, user.email)
+        val email = user.email.takeUnless { UserIds.isSynthetic(it) }.orEmpty()
+        val isNewOnThisPhone = repository.saveSignedInUser(user.uid, user.name, email)
+        resetAccountState()
         _currentUserId.value = user.uid
         _authState.value = AuthUiState()
         startSync(user, isNewOnThisPhone)
+    }
+
+    private fun resetAccountState() {
+        clearFriendSearch()
+        _myUserId.value = null
+        _mySettings.value = null
+        _myRole.value = null
+        _myBan.value = null
+        _ownerPanel.value = OwnerPanelState()
+        ownerListLimit = OWNER_PAGE_SIZE
     }
 
     /** Keeps the profile, friend list and messages in step while the app is running. */
@@ -148,7 +185,7 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
         syncJob?.cancel()
         refreshedPeers.clear()
         syncJob = viewModelScope.launch {
-            launch { syncOwnProfile(user, isNewOnThisPhone) }
+            launch { syncOwnProfile(user) }
             launch {
                 chat.observeFriendships(uid)
                     .catch { _toastMessage.value = readableCloudError(it) }
@@ -170,24 +207,57 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
                         }
                     }
             }
+            launch { community.observeOwnRole(uid).collect { _myRole.value = it.data?.value } }
+            launch { community.observeBan(uid).collect { _myBan.value = it.data } }
+            launch {
+                community.observeAnnouncements(1).collect { live ->
+                    live.data?.firstOrNull()?.let { notifyOnce(it) }
+                }
+            }
         }
     }
 
-    private suspend fun syncOwnProfile(user: CloudUser, isNewOnThisPhone: Boolean) {
-        if (isNewOnThisPhone) {
-            // Restore the online values first so new defaults do not overwrite them.
-            val saved = cloud.fetchProfile(user.uid).getOrElse {
-                _toastMessage.value = "Profile load nahi hua: ${it.message}"
-                return
-            }
-            if (saved != null) repository.applyProfile(user.uid, saved, isOwnAccount = true)
+    private fun notifyOnce(message: Announcement) {
+        if (notices.getString("last", null) == message.id) return
+        if (System.currentTimeMillis() - message.createdAt > NOTICE_MAX_AGE_MS) return
+        notices.edit().putString("last", message.id).apply()
+        Notifier.show(getApplication<Application>(), message.id.hashCode(), message.title, message.text)
+    }
+
+    /** The online wallet and settings are the source; the public profile is built from them. */
+    private suspend fun syncOwnProfile(user: CloudUser) {
+        val uid = user.uid
+        val loginEmail = user.email.takeUnless { UserIds.isSynthetic(it) }
+        account.ensureWallet(uid).onFailure {
+            _toastMessage.value = "Wallet load nahi hua: ${it.message}"
         }
-        repository.observeUser(user.uid)
-            .filterNotNull()
-            .map { PublicProfile(it.name, it.showCoinsOnProfile, it.walletCoins, it.authorityCoins) }
+        account.ensureSettings(uid, user.name, loginEmail.orEmpty()).onFailure {
+            _toastMessage.value = "Profile load nahi hua: ${it.message}"
+        }
+        combine(
+            account.observeSettings(uid),
+            account.observeWallet(uid),
+            account.observeOwnUserId(uid)
+        ) { settings, wallet, userId -> Triple(settings, wallet, userId) }
             .distinctUntilChanged()
-            .collect { profile ->
-                cloud.publishProfile(user.uid, user.email, profile).onFailure {
+            .collect { (settingsState, walletState, userIdState) ->
+                (settingsState.error ?: walletState.error ?: userIdState.error)?.let {
+                    _toastMessage.value = it
+                }
+                val settings = settingsState.data ?: return@collect
+                val wallet = walletState.data ?: return@collect
+                val userId = userIdState.data ?: return@collect
+                _mySettings.value = settings
+                _myUserId.value = userId
+                accounts.setUserId(uid, userId)
+                _savedAccounts.value = accounts.list()
+                repository.applyOwnAccount(
+                    uid, settings.name, settings.showCoins, wallet.coins, wallet.authority
+                )
+                account.publishCard(
+                    uid, loginEmail, settings, wallet, userId, user.registeredAt,
+                    searchKeywords(settings.name)
+                ).onFailure {
                     _toastMessage.value = "Profile online save nahi hua: ${it.message}"
                 }
             }
@@ -260,12 +330,15 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
         if (userId != AppConstants.OWNER_UID) {
             return Result.failure(IllegalAccessException("Sirf Owner yeh kar sakta hai"))
         }
-        repository.setBalance(userId, coins, authority)
-        return Result.success(Unit)
+        return account.setWallet(userId, coins, authority)
     }
 
-    /** Link and flooding rules shared by direct and group chat. */
-    private fun chatRuleProblem(senderId: String, text: String): String? {
+    /** Ban, link and flooding rules shared by direct and group chat. */
+    private fun chatRuleProblem(senderId: String, text: String, isGroup: Boolean): String? {
+        val ban = _myBan.value
+        if (ban != null && ban.isActive && (isGroup || ban.allChat)) {
+            return "Aap chat se ban hain: ${formatDateTime(ban.until)} tak"
+        }
         if (LinkFilter.containsLink(text)) return "Chat mein website ya app ke links bhejna mana hai"
         val guard = floodGuards.getOrPut(senderId) { FloodGuard() }
         return when (val decision = guard.check(SystemClock.elapsedRealtime())) {
@@ -277,11 +350,44 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    suspend fun sendGroupMessage(senderId: String, groupId: String, text: String, tags: String): Result<Unit> {
-        chatRuleProblem(senderId, text)?.let {
+    suspend fun sendGroupMessage(
+        senderId: String,
+        senderName: String,
+        groupId: String,
+        text: String
+    ): Result<Unit> {
+        val clean = text.trim().take(2000)
+        if (clean.isBlank()) return Result.failure(IllegalArgumentException("Message khali hai"))
+        chatRuleProblem(senderId, clean, isGroup = true)?.let {
             return Result.failure(IllegalStateException(it))
         }
-        return repository.sendGroupMessage(senderId, groupId, text, tags)
+        return groups.sendMessage(groupId, senderId, senderName, clean)
+    }
+
+    /** Opens a chat with a staff member; [onReady] runs when messages can be sent. */
+    fun contactStaff(staff: StaffMember, onReady: () -> Unit) {
+        runAction { uid ->
+            repository.savePeer(staff.uid, staff.name, "")
+            val result = community.openStaffContact(uid, staff.uid, staff.name)
+            if (result.isSuccess) {
+                loadProfile(staff.uid)
+                onReady()
+            }
+            result
+        }
+    }
+
+    /** Makes sure a local record exists before a chat with this person is opened. */
+    fun rememberPerson(uid: String, name: String) {
+        viewModelScope.launch {
+            repository.savePeer(uid, name, "")
+            loadProfile(uid)
+        }
+    }
+
+    suspend fun requestFriend(fromUserId: String, toUserId: String, toName: String): Result<Unit> {
+        repository.savePeer(toUserId, toName, "")
+        return sendFriendRequest(fromUserId, toUserId)
     }
 
     suspend fun sendFriendRequest(fromUserId: String, toUserId: String): Result<Unit> {
@@ -308,7 +414,7 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
         if (relation == null || relation.status != "ACCEPTED") {
             return Result.failure(IllegalStateException("Pehle friend request accept honi chahiye"))
         }
-        chatRuleProblem(senderId, clean)?.let {
+        chatRuleProblem(senderId, clean, isGroup = false)?.let {
             return Result.failure(IllegalStateException(it))
         }
         return chat.sendMessage(senderId, receiverId, relation.id, clean).fold(
@@ -324,23 +430,62 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
         _authState.update { it.copy(isLoading = false, error = message) }
     }
 
-    fun login(email: String, password: String) {
-        if (email.isBlank() || password.isBlank()) {
-            showAuthError("Email aur password likhein")
+    private fun rememberAccount(user: CloudUser, password: String, userId: String?) {
+        accounts.save(user.uid, user.name, user.email, password)
+        if (userId != null) accounts.setUserId(user.uid, userId)
+        _savedAccounts.value = accounts.list()
+    }
+
+    /** [identifier] is an email address or a User ID. */
+    fun login(identifier: String, password: String) {
+        if (identifier.isBlank() || password.isBlank()) {
+            showAuthError("Email ya User ID aur password likhein")
             return
         }
         viewModelScope.launch {
             _authState.value = AuthUiState(isLoading = true)
-            cloud.signIn(email.trim(), password)
-                .onSuccess { openSession(it) }
-                .onFailure { showAuthError(it.message) }
+            val typed = identifier.trim()
+            var userId: String? = null
+            val email = if (typed.contains("@")) {
+                typed
+            } else {
+                val id = UserIds.normalise(typed)
+                if (UserIds.problem(id) != null) {
+                    showAuthError("User ID ya email ghalat hai")
+                    return@launch
+                }
+                val record = account.findUserId(id).getOrElse {
+                    showAuthError(it.message)
+                    return@launch
+                }
+                if (record == null) {
+                    showAuthError("Yeh User ID nahi mili")
+                    return@launch
+                }
+                userId = id
+                record.loginEmail ?: accounts.emailForUserId(id) ?: UserIds.syntheticEmail(id)
+            }
+            cloud.signIn(email, password)
+                .onSuccess {
+                    rememberAccount(it, password, userId)
+                    openSession(it)
+                }
+                .onFailure {
+                    showAuthError(
+                        if (userId == null) it.message
+                        else "${it.message}. Agar account email se bana tha to email se login karein."
+                    )
+                }
         }
     }
 
-    fun register(name: String, email: String, password: String) {
+    fun register(name: String, userId: String, email: String, password: String, idLogin: Boolean) {
         val cleanName = name.trim().take(50)
+        val id = UserIds.normalise(userId)
+        val mail = email.trim()
         val problem = when {
-            cleanName.isBlank() || email.isBlank() -> "Naam aur email likhein"
+            cleanName.isBlank() -> "Naam likhein"
+            UserIds.problem(id) != null -> UserIds.problem(id)
             else -> PasswordHasher.validateNewPassword(password)
         }
         if (problem != null) {
@@ -349,23 +494,43 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
         }
         viewModelScope.launch {
             _authState.value = AuthUiState(isLoading = true)
-            cloud.signUp(cleanName, email.trim(), password)
-                .onSuccess {
-                    openSession(it)
-                    _toastMessage.value = "Welcome ${it.name}!"
+            val taken = account.findUserId(id).getOrElse {
+                showAuthError(it.message)
+                return@launch
+            }
+            if (taken != null) {
+                showAuthError("User ID already taken")
+                return@launch
+            }
+            val authEmail = mail.ifBlank { UserIds.syntheticEmail(id) }
+            cloud.signUp(cleanName, authEmail, password)
+                .onSuccess { user ->
+                    val loginEmail = if (mail.isNotBlank() && idLogin) user.email else null
+                    val claim = account.claimUserId(user.uid, id, loginEmail)
+                    rememberAccount(user, password, if (claim.isSuccess) id else null)
+                    openSession(user)
+                    _toastMessage.value = claim.exceptionOrNull()?.let {
+                        "Account ban gaya, magar User ID save nahi hui: ${it.message}"
+                    } ?: "Welcome ${user.name}!"
                 }
-                .onFailure { showAuthError(it.message) }
+                .onFailure {
+                    showAuthError(
+                        if (mail.isBlank() && it.message == EMAIL_IN_USE) "User ID already taken"
+                        else it.message
+                    )
+                }
         }
     }
 
-    fun requestForgotPassword(email: String) {
-        if (email.isBlank()) {
-            showAuthError("Apni email likhein")
+    fun requestForgotPassword(identifier: String) {
+        val typed = identifier.trim()
+        if (!typed.contains("@")) {
+            showAuthError("Apni email likhein. Baghair email wale account ka password reset nahi hota.")
             return
         }
         viewModelScope.launch {
             _authState.value = AuthUiState(isLoading = true)
-            cloud.sendPasswordReset(email.trim())
+            cloud.sendPasswordReset(typed)
                 .onSuccess {
                     _authState.value = AuthUiState(
                         infoMessage = "Agar is email par account hai to reset link bhej diya gaya hai. Spam folder bhi dekhein."
@@ -382,7 +547,50 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
         PasswordHasher.validateNewPassword(newPassword)?.let {
             return Result.failure(IllegalArgumentException(it))
         }
-        return cloud.changePassword(current, newPassword)
+        val result = cloud.changePassword(current, newPassword)
+        if (result.isSuccess) {
+            cloud.currentUser()?.let { rememberAccount(it, newPassword, null) }
+        }
+        return result
+    }
+
+    /** Signs in to an account saved on this phone. */
+    fun switchAccount(uid: String) {
+        val saved = _savedAccounts.value.firstOrNull { it.uid == uid } ?: return
+        val password = accounts.password(uid)
+        if (password == null) {
+            _toastMessage.value = "Is ID ka password save nahi. Dobara login karein."
+            return
+        }
+        viewModelScope.launch {
+            _authState.value = AuthUiState(isLoading = true)
+            syncJob?.cancel()
+            cloud.signIn(saved.email, password)
+                .onSuccess {
+                    openSession(it)
+                    _toastMessage.value = "Ab aap ${it.name} ki ID par hain"
+                }
+                .onFailure { error ->
+                    _authState.value = AuthUiState()
+                    _toastMessage.value = error.message
+                    cloud.currentUser()?.let { startSync(it, false) }
+                }
+        }
+    }
+
+    fun forgetAccount(uid: String) {
+        accounts.remove(uid)
+        _savedAccounts.value = accounts.list()
+    }
+
+    /** Goes to the login screen and keeps this account saved for switching back. */
+    fun addAnotherAccount() {
+        cloud.currentUser()?.let { user ->
+            if (accounts.password(user.uid) == null) {
+                _toastMessage.value = "Yeh ID save nahi thi; wapas aane ke liye password se login karein"
+            }
+        }
+        signOutToLogin()
     }
 
     fun searchUsers(query: String) {
@@ -394,7 +602,7 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
         }
         searchJob = viewModelScope.launch {
             _friendSearch.value = FriendSearchState(isSearching = true)
-            cloud.searchUsers(query)
+            findPeople(query)
                 .onSuccess { found ->
                     val people = found.filter { it.uid != uid }
                         .map { person ->
@@ -413,17 +621,35 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** Search by User ID, email or name. */
+    private suspend fun findPeople(query: String): Result<List<CloudUser>> {
+        val byName = cloud.searchUsers(query)
+        val id = UserIds.normalise(query)
+        if (UserIds.problem(id) != null) return byName
+        val record = account.findUserId(id).getOrNull() ?: return byName
+        val profile = cloud.fetchProfile(record.uid).getOrNull() ?: return byName
+        val match = CloudUser(record.uid, profile.name, "", profile)
+        return Result.success(
+            listOf(match) + byName.getOrDefault(emptyList()).filter { it.uid != record.uid }
+        )
+    }
+
     fun clearFriendSearch() {
         searchJob?.cancel()
         _friendSearch.value = FriendSearchState()
     }
 
+    /** Logs out and removes this account from the phone's saved list. */
     fun logout() {
+        _currentUserId.value?.let { forgetAccount(it) }
+        signOutToLogin()
+    }
+
+    private fun signOutToLogin() {
         syncJob?.cancel()
+        _currentUserId.value?.let { account.clearActivity(it) }
         cloud.signOut()
-        clearFriendSearch()
-        _ownerPanel.value = OwnerPanelState()
-        ownerListLimit = OWNER_PAGE_SIZE
+        resetAccountState()
         _currentUserId.value = null
         _authState.value = AuthUiState()
     }
@@ -432,11 +658,6 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
         val uid = _currentUserId.value ?: return flowOf(emptyList())
         return repository.observeConversation(uid, peerId)
     }
-
-    fun observeGroup(groupId: String): Flow<GroupEntity?> = repository.observeGroup(groupId)
-    fun observeGroupMembers(groupId: String): Flow<List<GroupMemberEntity>> = repository.observeGroupMembers(groupId)
-    fun observeGroupMessages(groupId: String): Flow<List<GroupMessageEntity>> = repository.observeGroupMessages(groupId)
-    fun observeGroupDonations(groupId: String): Flow<List<GroupDonationEntity>> = repository.observeGroupDonations(groupId)
 
     // Generic action runner
     fun runAction(successMessage: String? = null, block: suspend (String) -> Result<Any>) {
@@ -459,5 +680,7 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
     private companion object {
         const val OWNER_PAGE_SIZE = 200L
         const val MIN_HEARTBEAT_GAP_MS = 4L * 60L * 1000L
+        const val NOTICE_MAX_AGE_MS = 3L * 24L * 60L * 60L * 1000L
+        const val EMAIL_IN_USE = "Is email se account pehle se bana hua hai"
     }
 }

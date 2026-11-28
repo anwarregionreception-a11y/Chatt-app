@@ -38,7 +38,6 @@ fun ChatsTab(
     allUsers: List<UserEntity>,
     friendRelations: List<FriendRelationEntity>,
     directMessages: List<DirectMessageEntity>,
-    complaints: List<SystemComplaintEntity>,
     friendSearch: FriendSearchState,
     onSearchUsers: (String) -> Unit,
     onClearSearch: () -> Unit,
@@ -66,7 +65,6 @@ fun ChatsTab(
         allUsers.filter { it.id in acceptedFriendIds && it.id != currentUser.id }
             .filter { search.isBlank() || it.name.contains(search, ignoreCase = true) }
     }
-    val pendingComplaintsCount = complaints.count { it.status == "PENDING" }
 
     Box(modifier = modifier.fillMaxSize()) {
         LazyColumn(
@@ -86,63 +84,14 @@ fun ChatsTab(
                 )
             }
 
-            // (System) Inbox pinned row for Group Owners
+            // Messages from the Owner, pinned
             item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onOpenSystemInbox() }
-                        .testTag("system_inbox_card"),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (pendingComplaintsCount > 0)
-                            MaterialTheme.colorScheme.secondaryContainer
-                        else MaterialTheme.colorScheme.surface
-                    )
+                PersonRow(
+                    name = "(System) Official",
+                    subtitle = "Owner ke messages aur notifications",
+                    onClick = onOpenSystemInbox
                 ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Shield,
-                                contentDescription = "System Inbox",
-                                tint = MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("(System)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                                    Text(
-                                        text = "Official",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                    )
-                                }
-                            }
-                            Text(
-                                text = if (pendingComplaintsCount > 0)
-                                    "$pendingComplaintsCount abuse/kick complaint(s) awaiting review"
-                                else "Kick complaints & 10-line chat reports appear here",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        if (pendingComplaintsCount > 0) {
-                            Badge { Text("$pendingComplaintsCount") }
-                        }
-                    }
+                    Icon(Icons.Filled.Shield, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 }
             }
 
@@ -211,7 +160,7 @@ fun ChatsTab(
                             )
                             Text("No friend chats yet", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "Tap the + button to find people by name or email.",
+                                "Tap the + button to find people by User ID, name or email.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -305,7 +254,7 @@ fun ChatsTab(
                     OutlinedTextField(
                         value = query,
                         onValueChange = { query = it },
-                        label = { Text("Poori email ya naam") },
+                        label = { Text("User ID, poori email ya naam") },
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -525,142 +474,6 @@ fun DirectChatScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SystemInboxScreen(
-    complaints: List<SystemComplaintEntity>,
-    allUsers: List<UserEntity>,
-    onBack: () -> Unit,
-    onOpenGroup: (String) -> Unit,
-    onResolveComplaint: (String, Boolean) -> Unit,
-    onSendFriendRequest: (String) -> Unit,
-    onOpenDirectChat: (String) -> Unit
-) {
-    var inspectedUser by remember { mutableStateOf<UserEntity?>(null) }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                title = { Text("(System) Owner Inbox") }
-            )
-        }
-    ) { padding ->
-        if (complaints.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Filled.VerifiedUser, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
-                    Text("No Kick Complaints", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "When a user files a complaint after being kicked, the 10-line chat arrives here.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(complaints, key = { it.id }) { item ->
-                    Card(
-                        shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(item.groupName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                AssistChip(
-                                    onClick = { onOpenGroup(item.groupId) },
-                                    label = { Text("Go to Group") },
-                                    leadingIcon = { Icon(Icons.Filled.Groups, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                                )
-                            }
-
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(
-                                    onClick = { inspectedUser = allUsers.firstOrNull { it.id == item.kickerId } }
-                                ) { Text("Kicker: ${item.kickerName}") }
-                                OutlinedButton(
-                                    onClick = { inspectedUser = allUsers.firstOrNull { it.id == item.kickedUserId } }
-                                ) { Text("Victim: ${item.kickedUserName}") }
-                            }
-
-                            Surface(
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(modifier = Modifier.padding(10.dp)) {
-                                    Text("Last 10 Lines at Time of Kick:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(item.chatLogTenLines, style = MaterialTheme.typography.bodySmall)
-                                }
-                            }
-
-                            if (item.status == "PENDING") {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    OutlinedButton(
-                                        onClick = { onResolveComplaint(item.id, false) },
-                                        modifier = Modifier.weight(1f)
-                                    ) { Text("Ignore") }
-                                    Button(
-                                        onClick = { onResolveComplaint(item.id, true) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                                        modifier = Modifier.weight(1f)
-                                    ) { Text("Kick 24h") }
-                                }
-                            } else {
-                                Text(
-                                    text = "Status: ${item.status}",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    inspectedUser?.let { u ->
-        UserProfileModal(
-            user = u,
-            isFriend = false,
-            onDismiss = { inspectedUser = null },
-            onAddFriend = { onSendFriendRequest(u.id) },
-            onStartChat = {
-                inspectedUser = null
-                onOpenDirectChat(u.id)
-            }
-        )
-    }
-}
-
 @Composable
 fun UserProfileModal(
     user: UserEntity,
@@ -669,63 +482,13 @@ fun UserProfileModal(
     onAddFriend: () -> Unit,
     onStartChat: () -> Unit
 ) {
-    val level = AuthorityEngine.getLevel(user.authorityCoins)
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                UserAvatar(user.name, user.profileImageUri, size = 48.dp)
-                Column {
-                    Text(user.name, style = MaterialTheme.typography.titleLarge)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        LevelPill(level)
-                        RolePill(user)
-                    }
-                }
-            }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (user.showCoinsOnProfile) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(Icons.Filled.MonetizationOn, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
-                            Text(
-                                text = "Available Coins: ${user.walletCoins}",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                        }
-                    }
-                } else {
-                    Text(
-                        text = "Coins hidden by user privacy setting",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Text("Authority Badges:", style = MaterialTheme.typography.labelLarge)
-                AuthorityBadgesRow(authorityCoins = user.authorityCoins)
-            }
-        },
-        confirmButton = {
-            Button(onClick = onStartChat) { Text("Chat") }
-        },
-        dismissButton = {
-            if (!isFriend) {
-                OutlinedButton(onClick = onAddFriend) { Text("Add Friend") }
-            } else {
-                TextButton(onClick = onDismiss) { Text("Close") }
-            }
-        }
+    ProfileDialog(
+        uid = user.id,
+        fallbackName = user.name,
+        onDismiss = onDismiss,
+        isFriend = isFriend,
+        onAddFriend = onAddFriend,
+        onStartChat = onStartChat
     )
 }
 

@@ -7,6 +7,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.notify.Notifier
 import com.example.ui.RaabtaAppRoot
 import com.example.ui.RaabtaViewModel
 import com.example.ui.theme.RaabtaTheme
@@ -14,6 +15,7 @@ import com.example.ui.theme.RaabtaTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Notifier.createChannel(this)
         // Light status and navigation bar icons on the black background
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),

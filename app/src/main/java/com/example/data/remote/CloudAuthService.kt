@@ -78,34 +78,6 @@ class CloudAuthService {
         }
     }
 
-    /** Creates or updates the signed-in user's public profile. Writes only when something changed. */
-    suspend fun publishProfile(uid: String, email: String, profile: PublicProfile): Result<Unit> = cloudCall {
-        withTimeout(CLOUD_TIMEOUT_MS) {
-            val document = db.collection("users").document(uid)
-            val current = document.get().await()
-            val name = profile.name.take(MAX_NAME_LENGTH)
-            val data = mutableMapOf<String, Any>(
-                "name" to name,
-                "keywords" to searchKeywords(name),
-                "showCoins" to profile.showCoins,
-                "authorityCoins" to profile.authorityCoins
-            )
-            if (profile.showCoins) data["coins"] = profile.coins
-            if (current.data != data) {
-                val batch = db.batch()
-                batch.set(document, data)
-                if (!current.exists()) {
-                    batch.set(
-                        db.collection("emails").document(email.lowercase()),
-                        mapOf("uid" to uid)
-                    )
-                }
-                batch.commit().await()
-            }
-            Unit
-        }
-    }
-
     /** Search by full email address, or by the beginning of any part of a name. */
     suspend fun searchUsers(query: String): Result<List<CloudUser>> = cloudCall {
         val clean = normalise(query)
@@ -141,20 +113,6 @@ class CloudAuthService {
         )
     }
 
-    private fun normalise(text: String): String =
-        text.trim().lowercase().split(Regex("\\s+")).joinToString(" ")
-
-    /** "Syeda Sanober" can be found by "sy", "syeda s", "sano" and so on. */
-    private fun searchKeywords(name: String): List<String> {
-        val clean = normalise(name)
-        return (listOf(clean) + clean.split(" "))
-            .flatMap { part ->
-                (2..minOf(part.length, MAX_KEYWORD_LENGTH)).map { part.take(it) }
-            }
-            .distinct()
-            .take(MAX_KEYWORDS)
-    }
-
     private fun FirebaseUser.toCloudUser(): CloudUser {
         val mail = email.orEmpty()
         val shownName = displayName?.takeIf { it.isNotBlank() } ?: mail.substringBefore("@")
@@ -163,8 +121,22 @@ class CloudAuthService {
 
     private companion object {
         const val SEARCH_LIMIT = 20L
-        const val MAX_NAME_LENGTH = 50
-        const val MAX_KEYWORD_LENGTH = 20
-        const val MAX_KEYWORDS = 100
     }
+}
+
+private const val MAX_KEYWORD_LENGTH = 20
+private const val MAX_KEYWORDS = 100
+
+private fun normalise(text: String): String =
+    text.trim().lowercase().split(Regex("\\s+")).joinToString(" ")
+
+/** "Syeda Sanober" can be found by "sy", "syeda s", "sano" and so on. */
+internal fun searchKeywords(name: String): List<String> {
+    val clean = normalise(name)
+    return (listOf(clean) + clean.split(" "))
+        .flatMap { part ->
+            (2..minOf(part.length, MAX_KEYWORD_LENGTH)).map { part.take(it) }
+        }
+        .distinct()
+        .take(MAX_KEYWORDS)
 }

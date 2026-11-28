@@ -29,8 +29,13 @@ import com.example.ui.components.UserAvatar
 fun MenuTab(
     currentUser: UserEntity,
     onInvestAuthority: (Long) -> Unit,
+    userId: String,
+    onOpenProfile: () -> Unit,
+    onOpenPeople: () -> Unit,
+    onOpenSpin: () -> Unit,
+    onOpenSupport: () -> Unit,
+    onOpenAccounts: () -> Unit,
     onOpenBuyCoins: () -> Unit,
-    onOpenSettings: () -> Unit,
     onOpenAuthorityGuide: () -> Unit,
     onOpenAdminPanel: () -> Unit,
     onOpenFaq: () -> Unit,
@@ -63,7 +68,7 @@ fun MenuTab(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(currentUser.name, style = MaterialTheme.typography.titleLarge)
                             Text(
-                                text = "${currentUser.email} • ${currentUser.mobileNumber}",
+                                text = if (userId.isBlank()) "User ID: Meri Profile mein banayen" else "User ID: $userId",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -109,9 +114,59 @@ fun MenuTab(
 
         item {
             MenuActionCard(
+                icon = Icons.Filled.Person,
+                title = "Meri Profile",
+                subtitle = "User ID, country, mobile, email aur privacy",
+                onClick = onOpenProfile,
+                testTag = "menu_profile"
+            )
+        }
+
+        item {
+            MenuActionCard(
+                icon = Icons.Filled.People,
+                title = "App Users",
+                subtitle = "Sab log, country ke hisaab se",
+                onClick = onOpenPeople,
+                testTag = "menu_people"
+            )
+        }
+
+        item {
+            MenuActionCard(
+                icon = Icons.Filled.Casino,
+                title = "Spin Game",
+                subtitle = "Har 24 ghante mein ek spin",
+                onClick = onOpenSpin,
+                testTag = "menu_spin"
+            )
+        }
+
+        item {
+            MenuActionCard(
+                icon = Icons.Filled.SupportAgent,
+                title = "Support",
+                subtitle = "Moderator, Cop, Mentor: contact ya apply",
+                onClick = onOpenSupport,
+                testTag = "menu_support"
+            )
+        }
+
+        item {
+            MenuActionCard(
+                icon = Icons.Filled.SwitchAccount,
+                title = "ID Switch",
+                subtitle = "Doosri ID add karein ya badlein",
+                onClick = onOpenAccounts,
+                testTag = "menu_accounts"
+            )
+        }
+
+        item {
+            MenuActionCard(
                 icon = Icons.Filled.AccountBalanceWallet,
-                title = "Buy Coins (PKR & Crypto)",
-                subtitle = "1 Coin = 50 PKR • JazzCash, EasyPaisa, IBFT, BTC, USDT, ETH",
+                title = "Top-up (Coins khareedein)",
+                subtitle = "1 Coin = 50 PKR",
                 onClick = onOpenBuyCoins,
                 testTag = "menu_buy_coins"
             )
@@ -121,19 +176,9 @@ fun MenuTab(
             MenuActionCard(
                 icon = Icons.Filled.MilitaryTech,
                 title = "16 Authority Levels & Badges",
-                subtitle = "View normalized badge tiers, kick durations & cooldowns",
+                subtitle = "Har level ke badges aur zaroori authority",
                 onClick = onOpenAuthorityGuide,
                 testTag = "menu_authority_guide"
-            )
-        }
-
-        item {
-            MenuActionCard(
-                icon = Icons.Filled.Settings,
-                title = "Settings & Privacy",
-                subtitle = "Friend requests, Group invites, Profile Coins ON/OFF, Mobile & Email",
-                onClick = onOpenSettings,
-                testTag = "menu_settings"
             )
         }
 
@@ -152,7 +197,7 @@ fun MenuTab(
                 MenuActionCard(
                     icon = Icons.Filled.AdminPanelSettings,
                     title = "Owner Admin Panel",
-                    subtitle = "Users, online/offline, device IDs, apni coins aur authority",
+                    subtitle = "Users, reports, staff, top-up, messages",
                     onClick = onOpenAdminPanel,
                     highlighted = true,
                     testTag = "menu_admin_panel"
@@ -245,135 +290,6 @@ private fun MenuActionCard(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
-@Composable
-fun BuyCoinsScreen(
-    currentUser: UserEntity,
-    orders: List<CoinOrderEntity>,
-    onBack: () -> Unit,
-    onSubmitOrder: (String, Long, String) -> Unit
-) {
-    val methods = listOf("JazzCash", "EasyPaisa", "IBFT", "BTC", "USDT", "Ethereum")
-    var selectedMethod by remember { mutableStateOf("JazzCash") }
-    var coinsText by remember { mutableStateOf("100") }
-    var refText by remember { mutableStateOf("") }
-
-    val coins = coinsText.toLongOrNull() ?: 0L
-    val totalPkr = coins * AppConstants.COIN_PRICE_PKR
-    val isCrypto = selectedMethod in listOf("BTC", "USDT", "Ethereum")
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                title = { Text("Buy Coins") }
-            )
-        }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            item {
-                Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("1 Coin = 50 PKR", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        Text(
-                            "Coins are credited after Owner approval. Crypto (BTC, USDT, Ethereum) requires minimum 20 coins (max unlimited).",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-            }
-
-            item {
-                Text("Select Payment Method", style = MaterialTheme.typography.titleSmall)
-                Spacer(Modifier.height(8.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    methods.forEach { method ->
-                        FilterChip(
-                            selected = selectedMethod == method,
-                            onClick = { selectedMethod = method },
-                            label = { Text(method) }
-                        )
-                    }
-                }
-            }
-
-            item {
-                OutlinedTextField(
-                    value = coinsText,
-                    onValueChange = { coinsText = it.filter { ch -> ch.isDigit() } },
-                    label = { Text(if (isCrypto) "Coins (Min 20 for $selectedMethod)" else "Number of Coins") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().testTag("buy_coins_amount_input")
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = refText,
-                    onValueChange = { refText = it },
-                    label = { Text("Transaction ID / Wallet Reference") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(10.dp))
-                Text("Total Equivalent: $totalPkr PKR", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(10.dp))
-                Button(
-                    onClick = {
-                        onSubmitOrder(selectedMethod, coins, refText)
-                        refText = ""
-                    },
-                    modifier = Modifier.fillMaxWidth().height(50.dp).testTag("submit_coin_order_button")
-                ) {
-                    Text("Submit Order for Owner Approval")
-                }
-            }
-
-            item {
-                Text("Your Coin Orders", style = MaterialTheme.typography.titleMedium)
-            }
-
-            items(orders.filter { it.userId == currentUser.id }, key = { it.id }) { order ->
-                Card(shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("${order.coinsRequested} Coins via ${order.paymentMethod}", style = MaterialTheme.typography.titleSmall)
-                            Text("${order.amountPkr} PKR • Ref: ${order.referenceNote}", style = MaterialTheme.typography.bodySmall)
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = when (order.status) {
-                                "APPROVED" -> MaterialTheme.colorScheme.primaryContainer
-                                "REJECTED" -> MaterialTheme.colorScheme.errorContainer
-                                else -> MaterialTheme.colorScheme.secondaryContainer
-                            }
-                        ) {
-                            Text(
-                                order.status,
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AuthorityGuideScreen(
@@ -411,11 +327,6 @@ fun AuthorityGuideScreen(
             }
 
             items(AuthorityEngine.levelThresholds.reversed(), key = { it.level }) { item ->
-                val kickMins = AuthorityEngine.kickDurationMinutes(item.level)
-                val cooldownMins = AuthorityEngine.kickCooldownMinutes(item.level)
-                val immunity = AuthorityEngine.unfairKickImmunityCount(item.level)
-                val ownerBanH = AuthorityEngine.ownerChatBanHours(item.level)
-
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(
@@ -431,27 +342,12 @@ fun AuthorityGuideScreen(
                         ) {
                             LevelPill(item.level)
                             Text(
-                                text = "Cooldown: ${AuthorityEngine.formatDurationMinutes(cooldownMins)}",
+                                text = "Authority ${item.minCoins}+",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         AuthorityBadgesRow(authorityCoins = item.minCoins)
-                        val rulesSummary = buildList {
-                            if (item.level >= 2) add("Supervisor Eligible")
-                            if (kickMins > 0) add("Kick: ${AuthorityEngine.formatDurationMinutes(kickMins)}")
-                            if (immunity > 0) add("Unfair Immunity: $immunity")
-                            if (item.level >= 14) add("Private Group Access")
-                            if (ownerBanH > 0) add("Ban Owner Chat: ${ownerBanH}h")
-                            if (item.level >= 16) add("50-Coin Blacklist Entry")
-                        }
-                        if (rulesSummary.isNotEmpty()) {
-                            Text(
-                                text = rulesSummary.joinToString(" • "),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
                     }
                 }
             }
