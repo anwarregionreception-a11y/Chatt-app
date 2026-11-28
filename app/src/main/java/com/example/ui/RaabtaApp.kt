@@ -64,13 +64,6 @@ fun RaabtaAppRoot(viewModel: RaabtaViewModel) {
     ) { innerPadding ->
         Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             when {
-                authState.pendingForceChangeUserId != null -> {
-                    ForceChangePasswordScreen(
-                        authState = authState,
-                        onSubmit = viewModel::completeForceChangePassword,
-                        onCancelToLogin = viewModel::cancelForceChangePassword
-                    )
-                }
                 currentUser == null -> {
                     LoginScreen(
                         authState = authState,
@@ -78,7 +71,7 @@ fun RaabtaAppRoot(viewModel: RaabtaViewModel) {
                         onRegister = viewModel::register,
                         onForgotPassword = viewModel::requestForgotPassword,
                         onClearError = viewModel::clearAuthError,
-                        onClearTempInfo = viewModel::clearDeliveredTempInfo
+                        onClearInfo = viewModel::clearInfoMessage
                     )
                 }
                 else -> {
@@ -107,6 +100,8 @@ private fun AuthenticatedNavHost(
     val coinOrders by viewModel.allCoinOrders.collectAsStateWithLifecycle()
     val ownerComplaints by viewModel.ownerComplaints.collectAsStateWithLifecycle()
     val allRatings by viewModel.allRatings.collectAsStateWithLifecycle()
+
+    val friendSearch by viewModel.friendSearch.collectAsStateWithLifecycle()
 
     var selectedTab by remember { mutableStateOf(HomeTab.CHAT) }
 
@@ -188,6 +183,9 @@ private fun AuthenticatedNavHost(
                             friendRelations = friendRelations,
                             directMessages = directMessages,
                             complaints = ownerComplaints,
+                            friendSearch = friendSearch,
+                            onSearchUsers = viewModel::searchUsers,
+                            onClearSearch = viewModel::clearFriendSearch,
                             onOpenDirectChat = { peerId -> navController.navigate(Routes.directChat(peerId)) },
                             onOpenSystemInbox = { navController.navigate(Routes.SYSTEM_INBOX) },
                             onAcceptFriend = { relId ->
@@ -408,8 +406,8 @@ private fun AuthenticatedNavHost(
                     }
                 },
                 onChangePassword = { curr, newP, conf ->
-                    viewModel.runAction("Password changed successfully") { uid ->
-                        viewModel.repository.changeOwnPassword(uid, curr, newP, conf)
+                    viewModel.runAction("Password changed successfully") {
+                        viewModel.changePassword(curr, newP, conf)
                     }
                 }
             )

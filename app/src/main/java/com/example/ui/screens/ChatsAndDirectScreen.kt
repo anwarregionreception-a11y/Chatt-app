@@ -27,6 +27,7 @@ import com.example.ui.components.LevelPill
 import com.example.ui.components.RolePill
 import com.example.ui.components.UserAvatar
 import com.example.ui.theme.ChatSentBubble
+import com.example.ui.FriendSearchState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -38,6 +39,9 @@ fun ChatsTab(
     friendRelations: List<FriendRelationEntity>,
     directMessages: List<DirectMessageEntity>,
     complaints: List<SystemComplaintEntity>,
+    friendSearch: FriendSearchState,
+    onSearchUsers: (String) -> Unit,
+    onClearSearch: () -> Unit,
     onOpenDirectChat: (String) -> Unit,
     onOpenSystemInbox: () -> Unit,
     onAcceptFriend: (String) -> Unit,
@@ -206,7 +210,7 @@ fun ChatsTab(
                             )
                             Text("No friend chats yet", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "Tap the + button to send a friend request and start chatting.",
+                                "Tap the + button to find people by name or email.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -287,34 +291,51 @@ fun ChatsTab(
     }
 
     if (showAddFriendDialog) {
-        val candidates = allUsers.filter { it.id != currentUser.id && it.id !in acceptedFriendIds }
+        var query by remember { mutableStateOf("") }
+        val closeDialog = {
+            showAddFriendDialog = false
+            onClearSearch()
+        }
         AlertDialog(
-            onDismissRequest = { showAddFriendDialog = false },
-            title = { Text("Add Friends") },
+            onDismissRequest = closeDialog,
+            title = { Text("Find Friends") },
             text = {
-                LazyColumn(
-                    modifier = Modifier.heightIn(max = 360.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(candidates, key = { it.id }) { person ->
-                        val pending = friendRelations.any {
-                            it.status == "PENDING" && (it.userA == person.id || it.userB == person.id)
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            UserAvatar(person.name, person.profileImageUri, size = 36.dp)
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(person.name, style = MaterialTheme.typography.titleSmall)
-                                Text("Level ${AuthorityEngine.getLevel(person.authorityCoins)}", style = MaterialTheme.typography.labelSmall)
-                            }
-                            if (pending) {
-                                Text("Pending", style = MaterialTheme.typography.labelSmall)
-                            } else {
-                                TextButton(onClick = { onSendFriendRequest(person.id) }) {
-                                    Text("Add")
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        label = { Text("Poori email ya naam") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("user_search_input")
+                    )
+                    Button(
+                        onClick = { onSearchUsers(query) },
+                        enabled = !friendSearch.isSearching,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (friendSearch.isSearching) "Searching..." else "Search")
+                    }
+                    friendSearch.message?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall)
+                    }
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 260.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(friendSearch.results, key = { it.id }) { person ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                UserAvatar(person.name, person.profileImageUri, size = 36.dp)
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(person.name, style = MaterialTheme.typography.titleSmall)
+                                    if (person.email.isNotBlank()) {
+                                        Text(person.email, style = MaterialTheme.typography.labelSmall)
+                                    }
                                 }
                             }
                         }
@@ -322,7 +343,7 @@ fun ChatsTab(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showAddFriendDialog = false }) { Text("Done") }
+                TextButton(onClick = closeDialog) { Text("Done") }
             }
         )
     }

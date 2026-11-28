@@ -3,23 +3,35 @@ package com.example.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.data.LoginResult
 import com.example.data.RaabtaRepository
 import com.example.data.local.*
+import com.example.data.remote.CloudAuthService
+import com.example.data.remote.CloudUser
+import com.example.security.PasswordHasher
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 data class AuthUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
-    val deliveredTempInfo: String? = null,
-    val pendingForceChangeUserId: String? = null,
-    val prefilledTempPass: String = ""
+    val infoMessage: String? = null
+)
+
+data class FriendSearchState(
+    val isSearching: Boolean = false,
+    val results: List<UserEntity> = emptyList(),
+    val message: String? = null
 )
 
 class RaabtaViewModel(application: Application) : AndroidViewModel(application) {
     private val dao = AppDatabase.getInstance(application).appDao()
     val repository = RaabtaRepository(dao)
+    private val cloud = CloudAuthService()
+
+    private val _friendSearch = MutableStateFlow(FriendSearchState())
+    val friendSearch: StateFlow<FriendSearchState> = _friendSearch.asStateFlow()
+    private var searchJob: Job? = null
 
     private val _currentUserId = MutableStateFlow<String?>(null)
     val currentUserId: StateFlow<String?> = _currentUserId.asStateFlow()
@@ -70,8 +82,9 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
-        viewModelScope.launch {
-            repository.ensureSeeded()
+        // Stay signed in between app launches.
+        cloud.currentUser()?.let { user ->
+            viewModelScope.launch { openSession(user) }
         }
     }
 
@@ -87,97 +100,116 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
         _authState.update { it.copy(error = null) }
     }
 
-    fun clearDeliveredTempInfo() {
-        _authState.update { it.copy(deliveredTempInfo = null) }
+    fun clearInfoMessage() {
+        _authState.update { it.copy(infoMessage = null) }
     }
 
-    fun login(identifier: String, password: String) {
+    private suspend fun openSession(user: CloudUser) {
+        repository.saveSignedInUser(user.uid, user.name, user.email)
+        _currentUserId.value = user.uid
+        _authState.value = AuthUiState()
         viewModelScope.launch {
-            _authState.update { it.copy(isLoading = true, error = null) }
-            when (val res = repository.login(identifier, password)) {
-                is LoginResult.Success -> {
-                    _authState.update { it.copy(isLoading = false, pendingForceChangeUserId = null, prefilledTempPass = "") }
-                    _currentUserId.value = res.user.id
-                }
-                is LoginResult.ForceChangePassword -> {
-                    _authState.update {
-                        it.copy(
-                            isLoading = false,
-                            pendingForceChangeUserId = res.user.id,
-                            prefilledTempPass = res.prefilledTemp
-                        )
-                    }
-                }
-                is LoginResult.Error -> {
-                    _authState.update { it.copy(isLoading = false, error = res.message) }
-                }
+            cloud.ensureProfile(user).onFailure { e ->
+                _toastMessage.value = "Profile online save nahi hua: ${e.message}"
             }
         }
     }
 
-    fun register(name: String, email: String, mobile: String, password: String) {
+    private fun showAuthError(message: String?) {
+        _authState.update { it.copy(isLoading = false, error = message) }
+    }
+
+    fun login(email: String, password: String) {
+        if (email.isBlank() || password.isBlank()) {
+            showAuthError("Email aur password likhein")
+            return
+        }
         viewModelScope.launch {
-            _authState.update { it.copy(isLoading = true, error = null) }
-            repository.registerUser(name, email, mobile, password)
-                .onSuccess { user ->
-                    _authState.update { it.copy(isLoading = false) }
-                    _currentUserId.value = user.id
-                    _toastMessage.value = "Welcome ${user.name}! +50 Starter Coins added."
-                }
-                .onFailure { e ->
-                    _authState.update { it.copy(isLoading = false, error = e.message ?: "Registration failed") }
-                }
+            _authState.value = AuthUiState(isLoading = true)
+            cloud.signIn(email.trim(), password)
+                .onSuccess { openSession(it) }
+                .onFailure { showAuthError(it.message) }
         }
     }
 
-    fun requestForgotPassword(identifier: String) {
+    fun register(name: String, email: String, password: String) {
+        val cleanName = name.trim().take(50)
+        val problem = when {
+            cleanName.isBlank() || email.isBlank() -> "Naam aur email likhein"
+            else -> PasswordHasher.validateNewPassword(password)
+        }
+        if (problem != null) {
+            showAuthError(problem)
+            return
+        }
         viewModelScope.launch {
-            _authState.update { it.copy(isLoading = true, error = null, deliveredTempInfo = null) }
-            repository.requestUserForgotPassword(identifier)
-                .onSuccess { (user, tempPass) ->
-                    _authState.update {
-                        it.copy(
-                            isLoading = false,
-                            deliveredTempInfo = "Email (${user.email}) & SMS (${user.mobileNumber}) sent!\nTemporary Password: $tempPass (Valid 15 mins, single-use)"
-                        )
-                    }
+            _authState.value = AuthUiState(isLoading = true)
+            cloud.signUp(cleanName, email.trim(), password)
+                .onSuccess {
+                    openSession(it)
+                    _toastMessage.value = "Welcome ${it.name}!"
                 }
-                .onFailure { e ->
-                    _authState.update { it.copy(isLoading = false, error = e.message ?: "Reset failed") }
-                }
+                .onFailure { showAuthError(it.message) }
         }
     }
 
-    fun completeForceChangePassword(tempInput: String, newPass: String, confirmPass: String) {
-        val uid = _authState.value.pendingForceChangeUserId ?: return
+    fun requestForgotPassword(email: String) {
+        if (email.isBlank()) {
+            showAuthError("Apni email likhein")
+            return
+        }
         viewModelScope.launch {
-            _authState.update { it.copy(isLoading = true, error = null) }
-            repository.completeForceChangePassword(uid, tempInput, newPass, confirmPass)
-                .onSuccess { user ->
-                    _authState.update {
-                        it.copy(
-                            isLoading = false,
-                            pendingForceChangeUserId = null,
-                            prefilledTempPass = "",
-                            deliveredTempInfo = null
-                        )
-                    }
-                    _currentUserId.value = user.id
-                    _toastMessage.value = "Password updated successfully!"
+            _authState.value = AuthUiState(isLoading = true)
+            cloud.sendPasswordReset(email.trim())
+                .onSuccess {
+                    _authState.value = AuthUiState(
+                        infoMessage = "Agar is email par account hai to reset link bhej diya gaya hai. Spam folder bhi dekhein."
+                    )
                 }
-                .onFailure { e ->
-                    _authState.update { it.copy(isLoading = false, error = e.message ?: "Could not update password") }
-                }
+                .onFailure { showAuthError(it.message) }
         }
     }
 
-    fun cancelForceChangePassword() {
-        _authState.update {
-            it.copy(pendingForceChangeUserId = null, prefilledTempPass = "", error = null)
+    suspend fun changePassword(current: String, newPassword: String, confirm: String): Result<Unit> {
+        if (newPassword != confirm) {
+            return Result.failure(IllegalArgumentException("Password match nahi ho raha"))
         }
+        PasswordHasher.validateNewPassword(newPassword)?.let {
+            return Result.failure(IllegalArgumentException(it))
+        }
+        return cloud.changePassword(current, newPassword)
+    }
+
+    fun searchUsers(query: String) {
+        val uid = _currentUserId.value ?: return
+        searchJob?.cancel()
+        if (query.trim().length < 2) {
+            _friendSearch.value = FriendSearchState(message = "Kam az kam 2 huroof likhein")
+            return
+        }
+        searchJob = viewModelScope.launch {
+            _friendSearch.value = FriendSearchState(isSearching = true)
+            cloud.searchUsers(query)
+                .onSuccess { found ->
+                    val people = found.filter { it.uid != uid }
+                        .map { repository.savePeer(it.uid, it.name, it.email) }
+                    _friendSearch.value = FriendSearchState(
+                        results = people,
+                        message = if (people.isEmpty()) "Koi user nahi mila" else null
+                    )
+                }
+                .onFailure { _friendSearch.value = FriendSearchState(message = it.message) }
+        }
+    }
+
+    fun clearFriendSearch() {
+        searchJob?.cancel()
+        _friendSearch.value = FriendSearchState()
     }
 
     fun logout() {
+        cloud.signOut()
+        clearFriendSearch()
         _currentUserId.value = null
         _authState.value = AuthUiState()
     }

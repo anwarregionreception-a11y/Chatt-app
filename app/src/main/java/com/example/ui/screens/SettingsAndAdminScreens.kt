@@ -108,8 +108,9 @@ fun SettingsScreen(
                     )
                     OutlinedTextField(
                         value = email,
-                        onValueChange = { email = it },
-                        label = { Text("Change Email") },
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Login Email") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )

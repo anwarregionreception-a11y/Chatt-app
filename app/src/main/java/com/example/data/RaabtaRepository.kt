@@ -15,20 +15,37 @@ sealed class LoginResult {
 
 class RaabtaRepository(private val dao: AppDao) {
 
-    suspend fun ensureSeeded() {
-    if (dao.countUsers() > 0) return
-    val owner = UserEntity(
-        id = AppConstants.OWNER_ID,
-        name = "Owner",
-        email = "anwarzaibkhan789@gmail.com",
-        mobileNumber = "03295129773",
-        passwordHash = PasswordHasher.hashPassword("Kml88lvcl6"),
-        role = UserRoles.OWNER,
-        walletCoins = 100000000L,
-        authorityCoins = 1000000L
-    )
-    dao.upsertUser(owner)
-}
+    // --- ONLINE ACCOUNTS (local copy) ---
+
+    suspend fun saveSignedInUser(userId: String, name: String, email: String) {
+        val existing = dao.getUserById(userId)
+        dao.upsertUser(
+            existing?.copy(name = name, email = email) ?: UserEntity(
+                id = userId,
+                name = name,
+                email = email,
+                mobileNumber = "",
+                passwordHash = "", // Firebase Authentication keeps the password
+                walletCoins = 50L,
+                authorityCoins = 1L
+            )
+        )
+    }
+
+    suspend fun savePeer(userId: String, name: String, email: String): UserEntity {
+        val existing = dao.getUserById(userId)
+        val peer = existing?.copy(name = name, email = email.ifBlank { existing.email })
+            ?: UserEntity(
+                id = userId,
+                name = name,
+                email = email,
+                mobileNumber = "",
+                passwordHash = "",
+                showCoinsOnProfile = false
+            )
+        dao.upsertUser(peer)
+        return peer
+    }
 
     fun observeAllUsers(): Flow<List<UserEntity>> = dao.observeAllUsers()
     fun observeUser(userId: String): Flow<UserEntity?> = dao.observeUser(userId)
@@ -282,7 +299,6 @@ class RaabtaRepository(private val dao: AppDao) {
         dao.updateUser(
             user.copy(
                 mobileNumber = mobile.trim().ifBlank { user.mobileNumber },
-                email = email.trim().ifBlank { user.email },
                 showCoinsOnProfile = showCoinsOnProfile,
                 receiveFriendRequests = receiveFriendRequests,
                 receiveGroupInvites = receiveGroupInvites,
@@ -467,26 +483,8 @@ class RaabtaRepository(private val dao: AppDao) {
     // --- FRIENDS & DIRECT CHATS ---
 
     suspend fun sendFriendRequest(fromUserId: String, toUserId: String): Result<Unit> {
-        if (fromUserId == toUserId) return Result.failure(IllegalArgumentException("Cannot add yourself"))
-        val target = dao.getUserById(toUserId) ?: return Result.failure(IllegalArgumentException("User not found"))
-        if (!target.receiveFriendRequests) {
-            return Result.failure(IllegalStateException("${target.name} has disabled receiving Friend Requests"))
-        }
-        val existing = dao.findFriendRelation(fromUserId, toUserId)
-        if (existing != null) {
-            return Result.failure(IllegalStateException(if (existing.status == "ACCEPTED") "Already friends" else "Request already pending"))
-        }
-        dao.upsertFriendRelation(
-            FriendRelationEntity(
-                id = "fr_${UUID.randomUUID().toString().take(8)}",
-                userA = fromUserId,
-                userB = toUserId,
-                status = "PENDING",
-                requestedBy = fromUserId,
-                createdAt = System.currentTimeMillis()
-            )
-        )
-        return Result.success(Unit)
+        // A request saved only on this phone would never reach the other person.
+        return Result.failure(IllegalStateException("Online friend request agle update mein aayegi"))
     }
 
     suspend fun respondFriendRequest(relationId: String, accept: Boolean, allRelations: List<FriendRelationEntity>): Result<Unit> {
@@ -984,4 +982,3 @@ class RaabtaRepository(private val dao: AppDao) {
     }
 }
 
-private suspend fun AppDao.seedIfEmptyWrapper() = DatabaseSeeder.seedIfEmpty(this)
