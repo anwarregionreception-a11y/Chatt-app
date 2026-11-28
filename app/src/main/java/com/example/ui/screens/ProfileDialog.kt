@@ -4,11 +4,13 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.AppConstants
@@ -131,6 +133,7 @@ fun ProfileDialog(
                         ) { Text("Group se nikalein") }
                     }
                     if (amOwner) {
+                        OwnerWalletTools(uid, card.name)
                         Text("Staff appoint karein:", style = MaterialTheme.typography.labelLarge)
                         StaffRole.entries.forEach { role ->
                             FilterChip(
@@ -247,5 +250,46 @@ private fun ModeratorActions(targetUid: String, groupId: String) {
             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
             modifier = Modifier.fillMaxWidth()
         ) { Text("Dobara ghalti: sab groups se 2 ghante ban") }
+    }
+}
+
+/** Owner only: give coins or authority to this user, or take some away. */
+@Composable
+private fun OwnerWalletTools(uid: String, name: String) {
+    val viewModel = LocalAppViewModel.current
+    var coins by remember { mutableStateOf("") }
+    var authority by remember { mutableStateOf("") }
+
+    fun apply(sign: Long) {
+        val coinChange = (coins.toLongOrNull() ?: 0L) * sign
+        val authorityChange = (authority.toLongOrNull() ?: 0L) * sign
+        if (coinChange == 0L && authorityChange == 0L) return
+        viewModel.runAction("$name ka wallet badal diya. Us ki app dobara kholni hogi.") {
+            viewModel.community.adjustWallet(uid, coinChange, authorityChange)
+        }
+        coins = ""
+        authority = ""
+    }
+
+    Text("Coins / Authority dein ya kam karein:", style = MaterialTheme.typography.labelLarge)
+    OutlinedTextField(
+        value = coins,
+        onValueChange = { text -> coins = text.filter { it.isDigit() }.take(12) },
+        label = { Text("Coins") },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth()
+    )
+    OutlinedTextField(
+        value = authority,
+        onValueChange = { text -> authority = text.filter { it.isDigit() }.take(12) },
+        label = { Text("Authority coins") },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth()
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(onClick = { apply(1L) }, modifier = Modifier.weight(1f)) { Text("Dein") }
+        OutlinedButton(onClick = { apply(-1L) }, modifier = Modifier.weight(1f)) { Text("Kam karein") }
     }
 }

@@ -182,14 +182,15 @@ service cloud.firestore {
     }
 
     // The reward is decided by the server time of the spin, so the phone cannot choose it.
+    // Six wheel slices, clockwise from the top: 3 coins, 1 star, try again, 3 stars, 1 star, 1 coin.
     function spinReward(userId) {
       let before = get(/databases/$(database)/documents/spins/$(userId)).data;
       let after = getAfter(/databases/$(database)/documents/spins/$(userId)).data;
-      let slot = before.lastSpin.toMillis() % 5;
+      let slot = before.lastSpin.toMillis() % 6;
       return before.claimed == false
         && after.claimed == true
-        && request.resource.data.coins == resource.data.coins + [1, 3, 0, 0, 0][slot]
-        && request.resource.data.authority == resource.data.authority + [0, 0, 1, 3, 0][slot]
+        && request.resource.data.coins == resource.data.coins + [3, 0, 0, 0, 0, 1][slot]
+        && request.resource.data.authority == resource.data.authority + [0, 1, 0, 3, 1, 0][slot]
         && request.resource.data.get('lastAdAt', null) == resource.data.get('lastAdAt', null);
     }
 

@@ -436,7 +436,7 @@ class CloudCommunityService {
         }
 
     /** Spins (or finishes an interrupted spin) and adds the reward to the wallet. */
-    suspend fun spin(uid: String): Result<SpinReward> = timed {
+    suspend fun spin(uid: String): Result<Int> = timed {
         val document = db.collection("spins").document(uid)
         var current = document.get(Source.SERVER).await()
         val unfinished = current.exists() && current.getBoolean("claimed") == false
@@ -449,7 +449,8 @@ class CloudCommunityService {
             current = document.get(Source.SERVER).await()
         }
         val time = current.getTimestamp("lastSpin") ?: error("Spin save nahi hua")
-        val reward = SpinReward.forSpinTime(time.seconds * 1000L + time.nanoseconds / 1_000_000)
+        val slot = SpinReward.slotForSpinTime(time.seconds * 1000L + time.nanoseconds / 1_000_000)
+        val reward = SpinReward.WHEEL[slot]
         db.runBatch { batch ->
             batch.update(document, "claimed", true)
             if (reward.coins > 0 || reward.stars > 0) {
@@ -462,6 +463,23 @@ class CloudCommunityService {
                 )
             }
         }.await()
-        reward
+        slot
+    }
+
+    /** Owner only. Adds (or, with negative numbers, removes) coins and authority of any user. */
+    suspend fun adjustWallet(uid: String, coins: Long, authority: Long): Result<Unit> = timed {
+        db.runTransaction { transaction ->
+            val ref = db.collection("wallets").document(uid)
+            val snapshot = transaction.get(ref)
+            val newCoins = ((snapshot.getLong("coins") ?: 0L) + coins).coerceAtLeast(0L)
+            val newAuthority = ((snapshot.getLong("authority") ?: 0L) + authority).coerceAtLeast(0L)
+            transaction.set(
+                ref,
+                mapOf("coins" to newCoins, "authority" to newAuthority),
+                SetOptions.merge()
+            )
+            true
+        }.await()
+        Unit
     }
 }
