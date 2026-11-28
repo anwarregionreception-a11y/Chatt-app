@@ -2,6 +2,25 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // The single app Owner (Firebase Authentication UID).
+    function isOwner() {
+      return request.auth != null && request.auth.uid == 'AT0ZQHRqVIaSMHP2a8PYfU8MT7A2';
+    }
+
+    // "Last seen" and device records: only the Owner can read them.
+    match /presence/{userId} {
+      allow read: if isOwner();
+      allow create, update: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['name', 'deviceId', 'createdAt', 'lastSeen'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 50
+        && request.resource.data.deviceId is string
+        && request.resource.data.deviceId.size() <= 64
+        && request.resource.data.createdAt is int
+        && request.resource.data.lastSeen == request.time;
+    }
+
     // Public profile: signed-in users can find each other by name.
     match /users/{userId} {
       allow get: if request.auth != null;
@@ -63,6 +82,7 @@ service cloud.firestore {
         && request.resource.data.text is string
         && request.resource.data.text.size() >= 1
         && request.resource.data.text.size() <= 2000
+        && !request.resource.data.text.lower().matches('(?s).*(https?://|www[.]|t[.]me/|wa[.]me/).*')
         && request.resource.data.sentAt is int
         && isFriendPair(request.resource.data.pairId, request.auth.uid, userId);
     }

@@ -12,7 +12,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -20,7 +23,9 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.data.local.UserEntity
 import com.example.data.local.UserRoles
+import com.example.data.remote.CloudPresenceService
 import com.example.ui.screens.*
+import kotlinx.coroutines.delay
 
 object Routes {
     const val HOME = "home"
@@ -31,6 +36,7 @@ object Routes {
     const val SETTINGS = "settings"
     const val AUTHORITY_GUIDE = "authority_guide"
     const val ADMIN_PANEL = "admin_panel"
+    const val FAQ = "faq"
 
     fun directChat(peerId: String) = "chat/$peerId"
     fun groupChat(groupId: String) = "group/$groupId"
@@ -50,6 +56,19 @@ fun RaabtaAppRoot(viewModel: RaabtaViewModel) {
     val authState by viewModel.authState.collectAsStateWithLifecycle()
     val toastMsg by viewModel.toastMessage.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Report "online" only while the app is visible
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(currentUser?.id, lifecycleOwner) {
+        if (currentUser != null) {
+            lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (true) {
+                    viewModel.heartbeat()
+                    delay(CloudPresenceService.HEARTBEAT_MS)
+                }
+            }
+        }
+    }
 
     LaunchedEffect(toastMsg) {
         toastMsg?.let {
@@ -103,6 +122,8 @@ private fun AuthenticatedNavHost(
 
     val friendSearch by viewModel.friendSearch.collectAsStateWithLifecycle()
 
+    val ownerPanel by viewModel.ownerPanel.collectAsStateWithLifecycle()
+
     var selectedTab by remember { mutableStateOf(HomeTab.CHAT) }
 
     NavHost(navController = navController, startDestination = Routes.HOME) {
@@ -145,7 +166,7 @@ private fun AuthenticatedNavHost(
                                     )
                                 }
                             }
-                            if (user.role == UserRoles.OWNER || user.role == UserRoles.DEVELOPER) {
+                            if (user.role == UserRoles.OWNER) {
                                 IconButton(onClick = { navController.navigate(Routes.ADMIN_PANEL) }) {
                                     Icon(Icons.Filled.AdminPanelSettings, contentDescription = "Admin Panel")
                                 }
@@ -236,6 +257,7 @@ private fun AuthenticatedNavHost(
                             onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                             onOpenAuthorityGuide = { navController.navigate(Routes.AUTHORITY_GUIDE) },
                             onOpenAdminPanel = { navController.navigate(Routes.ADMIN_PANEL) },
+                            onOpenFaq = { navController.navigate(Routes.FAQ) },
                             onLogout = viewModel::logout
                         )
                         HomeTab.RATING -> RatingTab(
@@ -306,7 +328,7 @@ private fun AuthenticatedNavHost(
                 allUsers = allUsers,
                 onBack = { navController.popBackStack() },
                 onSendMessage = { text, tags ->
-                    viewModel.runAction { uid -> viewModel.repository.sendGroupMessage(uid, groupId, text, tags) }
+                    viewModel.runAction { uid -> viewModel.sendGroupMessage(uid, groupId, text, tags) }
                 },
                 onRenewGroup = {
                     viewModel.runAction("Group life renewed for 30 days!") { uid ->
@@ -423,44 +445,26 @@ private fun AuthenticatedNavHost(
         }
 
         composable(Routes.ADMIN_PANEL) {
-            AdminPanelScreen(
-                currentUser = user,
-                allUsers = allUsers,
-                coinOrders = coinOrders,
-                onBack = { navController.popBackStack() },
-                onAdminResetPassword = { targetId, customTemp, onSuccess ->
-                    viewModel.runAction { uid ->
-                        val res = viewModel.repository.adminResetPassword(uid, targetId, customTemp)
-                        res.onSuccess { code -> onSuccess(code) }
-                        res
-                    }
-                },
-                onSetBlocked = { targetId, block ->
-                    viewModel.runAction(if (block) "User blocked" else "User unblocked") { uid ->
-                        viewModel.repository.setUserBlocked(uid, targetId, block)
-                    }
-                },
-                onDeleteUser = { targetId ->
-                    viewModel.runAction("User deleted") { uid ->
-                        viewModel.repository.deleteUserByOwner(uid, targetId)
-                    }
-                },
-                onEditUser = { targetId, newName, newCoins ->
-                    viewModel.runAction("User updated") { uid ->
-                        viewModel.repository.editUserDetailsByOwner(uid, targetId, newName, newCoins)
-                    }
-                },
-                onAssignDeveloper = { targetId, isDev, lvl, pReset, pBlock, pCoins, pGroup ->
-                    viewModel.runAction("Developer role updated") { uid ->
-                        viewModel.repository.assignDeveloperRole(uid, targetId, isDev, lvl, pReset, pBlock, pCoins, pGroup)
-                    }
-                },
-                onReviewCoinOrder = { orderId, approve ->
-                    viewModel.runAction(if (approve) "Coin order approved & credited!" else "Coin order rejected") { uid ->
-                        viewModel.repository.reviewCoinOrder(uid, orderId, approve)
-                    }
-                }
-            )
+            if (user.role == UserRoles.OWNER) {
+                OwnerPanelScreen(
+                    currentUser = user,
+                    state = ownerPanel,
+                    onBack = { navController.popBackStack() },
+                    onRefresh = { viewModel.loadOwnerPanel() },
+                    onLoadMore = { viewModel.loadOwnerPanel(more = true) },
+                    onSaveBalance = { coins, authority ->
+                        viewModel.runAction("Save ho gaya") { uid ->
+                            viewModel.setOwnerBalance(uid, coins, authority)
+                        }
+                    },
+                    onShowDevice = viewModel::showDeviceAccounts,
+                    onCloseDevice = viewModel::closeDeviceAccounts
+                )
+            }
+        }
+
+        composable(Routes.FAQ) {
+            FaqScreen(onBack = { navController.popBackStack() })
         }
     }
 }

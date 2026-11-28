@@ -1,15 +1,22 @@
 package com.example.ui
 
 import android.app.Application
+import android.os.SystemClock
+import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.RaabtaRepository
 import com.example.data.local.*
 import com.example.data.remote.CloudAuthService
 import com.example.data.remote.CloudChatService
+import com.example.data.remote.CloudPresenceService
 import com.example.data.remote.CloudUser
+import com.example.data.remote.PresenceUser
 import com.example.data.remote.PublicProfile
 import com.example.data.remote.readableCloudError
+import com.example.domain.FloodDecision
+import com.example.domain.FloodGuard
+import com.example.domain.LinkFilter
 import com.example.security.PasswordHasher
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
@@ -19,6 +26,16 @@ data class AuthUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val infoMessage: String? = null
+)
+
+data class OwnerPanelState(
+    val isLoading: Boolean = false,
+    val total: Long = 0L,
+    val online: Long = 0L,
+    val users: List<PresenceUser> = emptyList(),
+    val hasMore: Boolean = false,
+    val error: String? = null,
+    val deviceAccounts: List<PresenceUser>? = null
 )
 
 data class FriendSearchState(
@@ -34,6 +51,14 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
     private val chat = CloudChatService()
     private var syncJob: Job? = null
     private val refreshedPeers = mutableSetOf<String>()
+
+    private val presence = CloudPresenceService()
+    private var lastHeartbeat: Pair<String, Long>? = null
+    private val floodGuards = mutableMapOf<String, FloodGuard>()
+
+    private val _ownerPanel = MutableStateFlow(OwnerPanelState())
+    val ownerPanel: StateFlow<OwnerPanelState> = _ownerPanel.asStateFlow()
+    private var ownerListLimit = OWNER_PAGE_SIZE
 
     private val _friendSearch = MutableStateFlow(FriendSearchState())
     val friendSearch: StateFlow<FriendSearchState> = _friendSearch.asStateFlow()
@@ -180,6 +205,85 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch { loadProfile(peerId) }
     }
 
+    /** Records that the app is open. Called on screen and then every few minutes. */
+    fun heartbeat() {
+        val user = cloud.currentUser() ?: return
+        val now = System.currentTimeMillis()
+        val last = lastHeartbeat
+        // Quick app switching should not cost extra database writes.
+        if (last != null && last.first == user.uid && now - last.second < MIN_HEARTBEAT_GAP_MS) return
+        lastHeartbeat = user.uid to now
+        val deviceId = Settings.Secure.getString(
+            getApplication<Application>().contentResolver,
+            Settings.Secure.ANDROID_ID
+        ).orEmpty()
+        viewModelScope.launch {
+            presence.heartbeat(user.uid, user.name, deviceId, user.registeredAt)
+                .onFailure { lastHeartbeat = null }
+        }
+    }
+
+    fun loadOwnerPanel(more: Boolean = false) {
+        if (_currentUserId.value != AppConstants.OWNER_UID) return
+        if (more) ownerListLimit += OWNER_PAGE_SIZE
+        viewModelScope.launch {
+            _ownerPanel.update { it.copy(isLoading = true, error = null) }
+            presence.loadDirectory(ownerListLimit)
+                .onSuccess { directory ->
+                    _ownerPanel.update {
+                        it.copy(
+                            isLoading = false,
+                            total = directory.total,
+                            online = directory.online,
+                            users = directory.users,
+                            hasMore = directory.users.size < directory.total
+                        )
+                    }
+                }
+                .onFailure { e -> _ownerPanel.update { it.copy(isLoading = false, error = e.message) } }
+        }
+    }
+
+    fun showDeviceAccounts(deviceId: String) {
+        viewModelScope.launch {
+            presence.accountsOnDevice(deviceId)
+                .onSuccess { accounts -> _ownerPanel.update { it.copy(deviceAccounts = accounts) } }
+                .onFailure { e -> _ownerPanel.update { it.copy(error = e.message) } }
+        }
+    }
+
+    fun closeDeviceAccounts() {
+        _ownerPanel.update { it.copy(deviceAccounts = null) }
+    }
+
+    suspend fun setOwnerBalance(userId: String, coins: Long, authority: Long): Result<Unit> {
+        if (userId != AppConstants.OWNER_UID) {
+            return Result.failure(IllegalAccessException("Sirf Owner yeh kar sakta hai"))
+        }
+        repository.setBalance(userId, coins, authority)
+        return Result.success(Unit)
+    }
+
+    /** Link and flooding rules shared by direct and group chat. */
+    private fun chatRuleProblem(senderId: String, text: String): String? {
+        if (LinkFilter.containsLink(text)) return "Chat mein website ya app ke links bhejna mana hai"
+        val guard = floodGuards.getOrPut(senderId) { FloodGuard() }
+        return when (val decision = guard.check(SystemClock.elapsedRealtime())) {
+            FloodDecision.Allowed -> null
+            FloodDecision.Warning ->
+                "Warning: itni tezi se message na bhejein, warna 90 second ke liye ban honge"
+            is FloodDecision.Blocked ->
+                "Flooding ki wajah se ${decision.secondsLeft} second baad message bhej sakenge"
+        }
+    }
+
+    suspend fun sendGroupMessage(senderId: String, groupId: String, text: String, tags: String): Result<Unit> {
+        chatRuleProblem(senderId, text)?.let {
+            return Result.failure(IllegalStateException(it))
+        }
+        return repository.sendGroupMessage(senderId, groupId, text, tags)
+    }
+
     suspend fun sendFriendRequest(fromUserId: String, toUserId: String): Result<Unit> {
         if (fromUserId == toUserId) {
             return Result.failure(IllegalArgumentException("Aap khud ko add nahi kar sakte"))
@@ -203,6 +307,9 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
         val relation = repository.findFriendRelation(senderId, receiverId)
         if (relation == null || relation.status != "ACCEPTED") {
             return Result.failure(IllegalStateException("Pehle friend request accept honi chahiye"))
+        }
+        chatRuleProblem(senderId, clean)?.let {
+            return Result.failure(IllegalStateException(it))
         }
         return chat.sendMessage(senderId, receiverId, relation.id, clean).fold(
             onSuccess = {
@@ -315,6 +422,8 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
         syncJob?.cancel()
         cloud.signOut()
         clearFriendSearch()
+        _ownerPanel.value = OwnerPanelState()
+        ownerListLimit = OWNER_PAGE_SIZE
         _currentUserId.value = null
         _authState.value = AuthUiState()
     }
@@ -345,5 +454,10 @@ class RaabtaViewModel(application: Application) : AndroidViewModel(application) 
                     _toastMessage.value = e.message ?: "Action failed"
                 }
         }
+    }
+
+    private companion object {
+        const val OWNER_PAGE_SIZE = 200L
+        const val MIN_HEARTBEAT_GAP_MS = 4L * 60L * 1000L
     }
 }

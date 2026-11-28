@@ -12,6 +12,8 @@ object UserRoles {
 
 object AppConstants {
     const val OWNER_ID = "owner_001"
+    // Firebase UID of the app Owner. firestore.rules enforces the same value on the server.
+    const val OWNER_UID = "AT0ZQHRqVIaSMHP2a8PYfU8MT7A2"
     const val COIN_PRICE_PKR = 50L
     const val GROUP_PURCHASE_COINS = 200L
     const val GROUP_INITIAL_MEMBER_LIMIT = 50

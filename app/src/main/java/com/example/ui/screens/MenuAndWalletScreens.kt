@@ -33,12 +33,13 @@ fun MenuTab(
     onOpenSettings: () -> Unit,
     onOpenAuthorityGuide: () -> Unit,
     onOpenAdminPanel: () -> Unit,
+    onOpenFaq: () -> Unit,
     onLogout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showBoostDialog by remember { mutableStateOf(false) }
     val level = AuthorityEngine.getLevel(currentUser.authorityCoins)
-    val isStaff = currentUser.role == UserRoles.OWNER || currentUser.role == UserRoles.DEVELOPER
+    val isStaff = currentUser.role == UserRoles.OWNER
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -136,12 +137,22 @@ fun MenuTab(
             )
         }
 
+        item {
+            MenuActionCard(
+                icon = Icons.Filled.Info,
+                title = "FAQ",
+                subtitle = "App ke bare mein sawal jawab",
+                onClick = onOpenFaq,
+                testTag = "menu_faq"
+            )
+        }
+
         if (isStaff) {
             item {
                 MenuActionCard(
                     icon = Icons.Filled.AdminPanelSettings,
-                    title = if (currentUser.role == UserRoles.OWNER) "Owner & Admin Panel" else "Developer Admin Panel",
-                    subtitle = "Search users, Reset Temp Passwords, Approve Coin Orders, Manage Roles",
+                    title = "Owner Admin Panel",
+                    subtitle = "Users, online/offline, device IDs, apni coins aur authority",
                     onClick = onOpenAdminPanel,
                     highlighted = true,
                     testTag = "menu_admin_panel"

@@ -12,7 +12,8 @@ data class CloudUser(
     val uid: String,
     val name: String,
     val email: String,
-    val profile: PublicProfile? = null
+    val profile: PublicProfile? = null,
+    val registeredAt: Long = 0L
 )
 
 /** What other signed-in users can see. [coins] is shared only when [showCoins] is on. */
@@ -44,7 +45,10 @@ class CloudAuthService {
             val change = UserProfileChangeRequest.Builder().setDisplayName(name).build()
             user.updateProfile(change).await()
         }
-        CloudUser(user.uid, name, user.email.orEmpty())
+        CloudUser(
+            user.uid, name, user.email.orEmpty(),
+            registeredAt = user.metadata?.creationTimestamp ?: System.currentTimeMillis()
+        )
     }
 
     suspend fun signIn(email: String, password: String): Result<CloudUser> = cloudCall {
@@ -154,7 +158,7 @@ class CloudAuthService {
     private fun FirebaseUser.toCloudUser(): CloudUser {
         val mail = email.orEmpty()
         val shownName = displayName?.takeIf { it.isNotBlank() } ?: mail.substringBefore("@")
-        return CloudUser(uid, shownName, mail)
+        return CloudUser(uid, shownName, mail, registeredAt = metadata?.creationTimestamp ?: 0L)
     }
 
     private companion object {

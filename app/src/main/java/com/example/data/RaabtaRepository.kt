@@ -24,8 +24,9 @@ class RaabtaRepository(private val dao: AppDao) {
     suspend fun saveSignedInUser(userId: String, name: String, email: String): Boolean {
         val existing = dao.getUserById(userId)
         dao.upsertUser(
-            existing?.copy(name = name, email = email) ?: UserEntity(
+            existing?.copy(name = name, email = email, role = roleFor(userId)) ?: UserEntity(
                 id = userId,
+                role = roleFor(userId),
                 name = name,
                 email = email,
                 mobileNumber = "",
@@ -35,6 +36,14 @@ class RaabtaRepository(private val dao: AppDao) {
             )
         )
         return existing == null
+    }
+
+    private fun roleFor(userId: String): String =
+        if (userId == AppConstants.OWNER_UID) UserRoles.OWNER else UserRoles.USER
+
+    suspend fun setBalance(userId: String, walletCoins: Long, authorityCoins: Long) {
+        val user = dao.getUserById(userId) ?: return
+        dao.upsertUser(user.copy(walletCoins = walletCoins, authorityCoins = authorityCoins))
     }
 
     /** Copies an online public profile onto the local record. */
@@ -58,9 +67,10 @@ class RaabtaRepository(private val dao: AppDao) {
 
     suspend fun savePeer(userId: String, name: String, email: String): UserEntity {
         val existing = dao.getUserById(userId)
-        val peer = existing?.copy(name = name, email = email.ifBlank { existing.email })
+        val peer = existing?.copy(name = name, email = email.ifBlank { existing.email }, role = roleFor(userId))
             ?: UserEntity(
                 id = userId,
+                role = roleFor(userId),
                 name = name,
                 email = email,
                 mobileNumber = "",

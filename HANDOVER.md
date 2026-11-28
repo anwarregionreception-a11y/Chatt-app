@@ -5,7 +5,7 @@ Last updated: 28 November 2026.
 
 ## Owner
 - Owner UID (Firebase Authentication): `AT0ZQHRqVIaSMHP2a8PYfU8MT7A2`
-- The Owner role is NOT active yet. It will be granted in phase 4, enforced by Firestore rules.
+- The Owner role is active: UID in `firestore.rules` (server) and `AppConstants.OWNER_UID` (UI).
 - Never put passwords, owner email or phone numbers in the code.
 
 ## Working style
@@ -40,6 +40,20 @@ Last updated: 28 November 2026.
 - Public profile (name, coins if allowed, authority) synced; name search uses keywords.
   These values come from the user's phone and are NOT trusted until phases 4 and 5.
   Profile pictures and mobile numbers are not synced.
+
+- Owner Admin Panel (users, online/offline, registration date, accounts per device, own coins and
+  authority), FAQ page, link blocking and flood control (warning, then 90 s). Needs rules republish and testing.
+  Flood control is enforced on the phone only.
+
+## Requested later (28 Nov), not built yet
+- Profile: name, country with small flag, mobile (can hide), email (can hide), authority, level, registration date.
+- Unique User ID chosen by the user: shown to everyone, searchable, login with User ID + password.
+- People section: all users with names, open profile and chat, filter and count by country.
+- A searched user's profile shows at the top which group they are online in.
+- Staff appointed only by the Owner: Mentor (answers app questions), Cop (reports illegal activity with the
+  user ID to the Owner's Reports section), Moderator (2 h group kick; repeat: 2 h ban from all group chat).
+- Support section: duties in English, contact available staff, apply for a staff role.
+- Owner adds top-up payment methods from the Admin Panel (note Google Play billing policy for the store).
 
 ## Pending
 - Test phase 2 on two phones, then merge into `main` (ask first).
